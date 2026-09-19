@@ -1,0 +1,5 @@
+idf_component_register(
+    SRCS "emqx_client.c"
+    INCLUDE_DIRS "."
+    REQUIRES esp-mqtt freertos esp_event
+)

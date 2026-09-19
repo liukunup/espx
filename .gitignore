@@ -1,0 +1,48 @@
+# Build output
+build/
+sdkconfig
+sdkconfig.old
+
+# ESP-IDF
+*.pyc
+__pycache__/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python virtual environment
+venv/
+env/
+.env
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-*
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Partition tables (generated)
+partitions_*.csv
+
+# Certificates and keys (if any)
+*.pem
+*.crt
+*.key
+!components/security/*.pem
+!components/security/*.crt
+!components/security/*.key

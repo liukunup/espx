@@ -6,12 +6,14 @@ idf_component_register(
         nvs_storage
         event_loop
         network_manager
-        mqtt_client
+        emqx_client
         config_manager
         health_monitor
         ota_manager
         remote_cmd
-        provisioning
+        wifi_provisioning
         sensor_manager
         actuator_manager
+        esp_driver_gpio
+        led_indicator
 )

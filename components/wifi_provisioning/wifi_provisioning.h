@@ -56,6 +56,13 @@ int provisioning_stop(void);
  */
 provisioning_state_t provisioning_get_state(void);
 
+/**
+ * @brief Get current AP SSID
+ *
+ * @return Pointer to SSID string
+ */
+const char* provisioning_get_ap_ssid(void);
+
 #ifdef __cplusplus
 }
 #endif
