@@ -10,6 +10,8 @@
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "log_system.h"
 #include "nvs_storage.h"
@@ -32,204 +34,22 @@
 static const char *TAG = "app_main";
 
 /**
- * @brief Check if provisioning is needed
- */
-static bool check_provisioning_needed(void);
-
-/**
- * @brief Connect to WiFi and start MQTT
- */
-static void app_connect(void);
-
-/**
- * @brief Main application task
- */
-static void app_main_task(void *params);
-
-/**
- * @brief Application initialization
- */
-static void app_init(void) {
-    ESP_LOGI(TAG, "===========================================");
-    ESP_LOGI(TAG, "ESP32 IoT Firmware v%s", "1.0.0");
-    ESP_LOGI(TAG, "===========================================");
-
-    // 0. Initialize LED indicator
-    led_indicator_init(LED_GPIO);
-    led_indicator_set_status(LED_STATUS_BOOT);
-    
-    // 1. Initialize log system
-    log_system_init();
-    ESP_LOGI(TAG, "Step 1: Log system initialized");
-
-    // 2. Initialize NVS storage
-    int ret = storage_init();
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Failed to initialize NVS: %d", ret);
-    }
-    ESP_LOGI(TAG, "Step 2: NVS storage initialized");
-
-    // 3. Initialize configuration manager
-    config_manager_init();
-    ESP_LOGI(TAG, "Step 3: Config manager initialized");
-
-    // 4. Initialize event loop
-    event_loop_init();
-    ESP_LOGI(TAG, "Step 4: Event loop initialized");
-
-    // 5. Initialize health monitor
-    health_monitor_init();
-    ESP_LOGI(TAG, "Step 5: Health monitor initialized");
-
-    // 6. Initialize network manager (skip if provisioning needed)
-    if (config_has_wifi()) {
-        network_manager_init();
-        ESP_LOGI(TAG, "Step 6: Network manager initialized");
-    } else {
-        ESP_LOGI(TAG, "Step 6: Skipped (provisioning mode)");
-    }
-
-    // 7. Initialize MQTT client (skip if provisioning needed)
-    if (config_has_wifi()) {
-        mqtt_client_init();
-        ESP_LOGI(TAG, "Step 7: MQTT client initialized");
-    } else {
-        ESP_LOGI(TAG, "Step 7: Skipped (provisioning mode)");
-    }
-
-    // 8. Initialize OTA manager
-    ota_manager_init();
-    ESP_LOGI(TAG, "Step 8: OTA manager initialized");
-
-    // 9. Initialize remote command
-    remote_cmd_init();
-    ESP_LOGI(TAG, "Step 9: Remote command initialized");
-
-    // 10. Initialize sensor manager
-    sensor_manager_init();
-    ESP_LOGI(TAG, "Step 10: Sensor manager initialized");
-
-    // 11. Initialize actuator manager
-    actuator_manager_init();
-    ESP_LOGI(TAG, "Step 11: Actuator manager initialized");
-
-    ESP_LOGI(TAG, "All components initialized successfully!");
-    ESP_LOGI(TAG, "Checking config_has_wifi...");
-    bool has_wifi = config_has_wifi();
-    ESP_LOGI(TAG, "config_has_wifi = %d", has_wifi);
-}
-
-/**
- * @brief Check if provisioning is needed
- */
-static bool check_provisioning_needed(void) {
-    if (!config_has_wifi()) {
-        ESP_LOGW(TAG, "No WiFi configuration found!");
-        ESP_LOGI(TAG, "Starting AP provisioning mode...");
-        // Initialize provisioning
-        provisioning_init();
-        provisioning_start();
-        return true;
-    }
-    return false;
-}
-
-/**
- * @brief Connect to WiFi and start MQTT
- */
-static void app_connect(void) {
-    // Get WiFi credentials
-    const char *ssid = config_get_wifi_ssid();
-    const char *password = config_get_wifi_password();
-
-    if (ssid == NULL || strlen(ssid) == 0) {
-        ESP_LOGW(TAG, "No WiFi SSID configured");
-        return;
-    }
-
-    ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid);
-
-    // Connect to WiFi
-    int ret = network_connect(ssid, password);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Failed to connect to WiFi: %d", ret);
-        return;
-    }
-
-    // Wait for connection
-    ret = network_wait_connected(30000);
-    if (ret == 0) {
-        ESP_LOGI(TAG, "WiFi connected!");
-    } else {
-        ESP_LOGW(TAG, "WiFi connection failed");
-    }
-}
-
-/**
  * @brief Main application task
  */
 static void app_main_task(void *params) {
     ESP_LOGI(TAG, "Application task started");
-    
-    // Initialize GPIO0 for factory reset detection (with pull-up, active low)
-    gpio_reset_pin(FACTORY_RESET_GPIO);
-    gpio_set_direction(FACTORY_RESET_GPIO, GPIO_MODE_INPUT);
-    gpio_pullup_en(FACTORY_RESET_GPIO);
-    gpio_pulldown_dis(FACTORY_RESET_GPIO);
-    
-    int reset_pressed_time = 0;
-    bool reset_triggered = false;
 
     while (1) {
-        // Check GPIO0 for factory reset (short to GND for 5 seconds)
-        if (gpio_get_level(FACTORY_RESET_GPIO) == 0) {
-            reset_pressed_time += 100;
-            
-            // Update LED as warning
-            if (reset_pressed_time >= 1000 && reset_pressed_time <= 5000) {
-                if (reset_pressed_time % 500 < 100) {
-                    // Flash red as warning
-                    led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);
-                }
-            }
-            
-            if (reset_pressed_time >= 5000 && !reset_triggered) {
-                ESP_LOGW(TAG, "Factory reset triggered by GPIO0!");
-                led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);
-                reset_triggered = true;
-                
-                // Flash LED and delay before reset
-                for (int i = 0; i < 10; i++) {
-                    led_indicator_task();
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                }
-                
-                ESP_LOGW(TAG, "Erasing NVS and restarting...");
-                nvs_flash_erase();
-                esp_restart();
-            }
-        } else {
-            if (reset_pressed_time > 0 && !reset_triggered) {
-                ESP_LOGI(TAG, "GPIO0 released, cancel reset");
-            }
-            reset_pressed_time = 0;
-        }
-        
-        // Update LED state
         led_indicator_task();
-        
-        // Check network connection
-        if (network_is_connected() && mqtt_is_connected()) {
-            // Publish telemetry periodically
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));  // Check every 100ms
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 /**
- * @brief Check GPIO for factory reset
- * Hold BOOT button for 10 seconds during startup to reset to factory defaults
+ * @brief Check GPIO12 for factory reset
+ * Hold GPIO12 for 5 seconds during startup, then release to confirm
+ * Flow: Hold 5s -> blink red (waiting for release) -> Release -> Erase NVS -> Restart
+ * This prevents accidental reset if user keeps holding the button
  */
 static void check_factory_reset(void) {
     gpio_reset_pin(FACTORY_RESET_GPIO);
@@ -237,32 +57,57 @@ static void check_factory_reset(void) {
     gpio_pullup_en(FACTORY_RESET_GPIO);
     gpio_pulldown_dis(FACTORY_RESET_GPIO);
     
-    ESP_LOGI(TAG, "Hold BOOT (GPIO0) 10s for factory reset...");
+    ESP_LOGI(TAG, "Hold GPIO12 5s for factory reset...");
     led_indicator_set_status(LED_STATUS_PROV_START);  // Yellow blinking
     
     int pressed_time = 0;
-    while (pressed_time < 10000) {
-        // Update LED state
+    bool waiting_for_release = false;
+    
+    while (1) {
+        // Update LED state periodically
         led_indicator_task();
         
-        if (gpio_get_level(FACTORY_RESET_GPIO) == 0) {
-            pressed_time += 100;
-            if (pressed_time % 1000 == 0) {
-                ESP_LOGI(TAG, "BOOT pressed: %ds/10s", pressed_time / 1000);
-                // Flash red to indicate progress
-                led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);
+        if (!waiting_for_release) {
+            // Phase 1: Wait for 5 seconds press
+            if (gpio_get_level(FACTORY_RESET_GPIO) == 0) {
+                pressed_time += 100;
+                if (pressed_time % 1000 == 0) {
+                    ESP_LOGI(TAG, "GPIO12 pressed: %ds/5s", pressed_time / 1000);
+                    // Flash red to indicate progress
+                    led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);
+                }
+                
+                if (pressed_time >= 5000) {
+                    // 5 seconds reached, enter waiting state
+                    waiting_for_release = true;
+                    ESP_LOGI(TAG, "GPIO12 held 5s, release to confirm factory reset");
+                }
+            } else {
+                if (pressed_time > 0) {
+                    ESP_LOGI(TAG, "GPIO12 released early, cancel reset");
+                    led_indicator_set_status(LED_STATUS_BOOT);
+                    return;
+                }
             }
         } else {
-            if (pressed_time > 0) {
-                ESP_LOGI(TAG, "BOOT released early, cancel reset");
-                led_indicator_set_status(LED_STATUS_BOOT);
-                return;
+            // Phase 2: Waiting for release - blink green
+            if (pressed_time % 200 < 100) {
+                led_indicator_set_pattern(LED_ON, LED_COLOR_GREEN);
+            } else {
+                led_indicator_set_pattern(LED_OFF, LED_COLOR_GREEN);
             }
-            pressed_time = 0;
+            
+            // Check if released
+            if (gpio_get_level(FACTORY_RESET_GPIO) == 1) {
+                ESP_LOGW(TAG, "GPIO12 released, starting factory reset!");
+                break;
+            }
         }
+        
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     
+    // Factory reset sequence
     ESP_LOGW(TAG, "Factory reset triggered!");
     led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);  // Red fast blink
     
@@ -274,15 +119,94 @@ static void check_factory_reset(void) {
 }
 
 void app_main(void) {
-    // Initialize LED first so we can see feedback during factory reset
+    // 立即打印日志
+    printf("=== ESP32 IoT Firmware Starting ===\n");
+    printf("Hello from ESP32-S3!\n");
+    
+    // Initialize LED
+    printf("Initializing LED...\n");
     led_indicator_init(LED_GPIO);
     led_indicator_set_status(LED_STATUS_BOOT);
+    printf("LED initialized\n");
+    
+    // Print startup banner
+    ESP_LOGI(TAG, "===========================================");
+    ESP_LOGI(TAG, "ESP32 IoT Firmware v1.0.0");
+    ESP_LOGI(TAG, "===========================================");
     
     // Check for factory reset
+    ESP_LOGI(TAG, "Checking factory reset...");
     check_factory_reset();
+    ESP_LOGI(TAG, "Factory reset check complete");
     
-    // Initialize all components
-    app_init();
+    // Initialize log system
+    ESP_LOGI(TAG, "Initializing log system...");
+    log_system_init();
+    ESP_LOGI(TAG, "Step 1: Log system initialized");
+
+    // Initialize NVS storage
+    ESP_LOGI(TAG, "Initializing NVS storage...");
+    int ret = storage_init();
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Failed to initialize NVS: %d", ret);
+    }
+    ESP_LOGI(TAG, "Step 2: NVS storage initialized");
+
+    // Initialize configuration manager
+    ESP_LOGI(TAG, "Initializing config manager...");
+    config_manager_init();
+    ESP_LOGI(TAG, "Step 3: Config manager initialized");
+
+    // Initialize event loop
+    ESP_LOGI(TAG, "Initializing event loop...");
+    event_loop_init();
+    ESP_LOGI(TAG, "Step 4: Event loop initialized");
+
+    // Initialize health monitor
+    ESP_LOGI(TAG, "Initializing health monitor...");
+    health_monitor_init();
+    ESP_LOGI(TAG, "Step 5: Health monitor initialized");
+
+    // Initialize network manager (skip if provisioning needed)
+    if (config_has_wifi()) {
+        network_manager_init();
+        ESP_LOGI(TAG, "Step 6: Network manager initialized");
+    } else {
+        ESP_LOGI(TAG, "Step 6: Skipped (provisioning mode)");
+    }
+
+    // Initialize MQTT client (skip if provisioning needed)
+    if (config_has_wifi()) {
+        mqtt_client_init();
+        ESP_LOGI(TAG, "Step 7: MQTT client initialized");
+    } else {
+        ESP_LOGI(TAG, "Step 7: Skipped (provisioning mode)");
+    }
+
+    // Initialize OTA manager
+    ESP_LOGI(TAG, "Initializing OTA manager...");
+    ota_manager_init();
+    ESP_LOGI(TAG, "Step 8: OTA manager initialized");
+
+    // Initialize remote command
+    ESP_LOGI(TAG, "Initializing remote command...");
+    remote_cmd_init();
+    ESP_LOGI(TAG, "Step 9: Remote command initialized");
+
+    // Initialize sensor manager
+    ESP_LOGI(TAG, "Initializing sensor manager...");
+    sensor_manager_init();
+    ESP_LOGI(TAG, "Step 10: Sensor manager initialized");
+
+    // Initialize actuator manager
+    ESP_LOGI(TAG, "Initializing actuator manager...");
+    actuator_manager_init();
+    ESP_LOGI(TAG, "Step 11: Actuator manager initialized");
+
+    ESP_LOGI(TAG, "All components initialized successfully!");
+    ESP_LOGI(TAG, "Checking config_has_wifi...");
+    bool has_wifi = config_has_wifi();
+    ESP_LOGI(TAG, "config_has_wifi = %d", has_wifi);
 
     // Check if provisioning is needed FIRST
     if (!config_has_wifi()) {
@@ -305,7 +229,30 @@ void app_main(void) {
     
     // Start WiFi connection
     ESP_LOGI(TAG, "Starting WiFi connection...");
-    app_connect();
+    
+    // Get WiFi credentials
+    const char *ssid = config_get_wifi_ssid();
+    const char *password = config_get_wifi_password();
+
+    if (ssid == NULL || strlen(ssid) == 0) {
+        ESP_LOGW(TAG, "No WiFi SSID configured");
+    } else {
+        ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid);
+
+        // Connect to WiFi
+        int ret = network_connect(ssid, password);
+        if (ret != 0) {
+            ESP_LOGE(TAG, "Failed to connect to WiFi: %d", ret);
+        } else {
+            // Wait for connection
+            ret = network_wait_connected(30000);
+            if (ret == 0) {
+                ESP_LOGI(TAG, "WiFi connected!");
+            } else {
+                ESP_LOGW(TAG, "WiFi connection failed");
+            }
+        }
+    }
 
     // Create main application task
     xTaskCreatePinnedToCore(app_main_task, "app_main", 4096, NULL, 5, NULL, 0);
