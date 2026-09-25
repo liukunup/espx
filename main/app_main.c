@@ -41,6 +41,7 @@ static void app_main_task(void *params) {
 
     while (1) {
         led_indicator_task();
+        led_indicator_cycle_tick();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -126,8 +127,9 @@ void app_main(void) {
     // Initialize LED
     printf("Initializing LED...\n");
     led_indicator_init(LED_GPIO);
-    led_indicator_set_status(LED_STATUS_BOOT);
-    printf("LED initialized\n");
+    // Start color cycle test: Blue LED -> Red -> Green -> Blue(WS2812)
+    led_indicator_cycle_colors();
+    printf("LED initialized, starting color cycle test\n");
     
     // Print startup banner
     ESP_LOGI(TAG, "===========================================");

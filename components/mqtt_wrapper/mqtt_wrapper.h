@@ -211,17 +211,8 @@ int mqtt_publish_cmd_response(const char *cmd_id, int code, const char *message,
  */
 int mqtt_publish_ota_progress(int progress, const char *message);
 
-// Topic macros
-#define TOPIC_TELEMETRY(device_id) "/device/" device_id "/telemetry"
-#define TOPIC_STATUS(device_id) "/device/" device_id "/status"
-#define TOPIC_LOG(device_id) "/device/" device_id "/log"
-#define TOPIC_CMD(device_id) "/device/" device_id "/cmd"
-#define TOPIC_CMD_RESPONSE(device_id) "/device/" device_id "/cmd/response"
-#define TOPIC_CONFIG(device_id) "/device/" device_id "/config"
-#define TOPIC_OTA_START(device_id) "/device/" device_id "/ota/start"
-#define TOPIC_OTA_DATA(device_id) "/device/" device_id "/ota/data"
-#define TOPIC_OTA_END(device_id) "/device/" device_id "/ota/end"
-#define TOPIC_OTA_PROGRESS(device_id) "/device/" device_id "/ota/progress"
+// Topic prefix (use with device ID)
+#define TOPIC_PREFIX "/device/"
 
 #ifdef __cplusplus
 }

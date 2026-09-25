@@ -40,6 +40,10 @@ static const uint32_t color_table[] = {
     [LED_COLOR_WHITE] = 0x00FFFFFF,   // R=255, G=255, B=255
 };
 
+// Color cycle state
+static volatile bool s_color_cycle_active = false;
+static volatile uint8_t s_color_index = 0;
+
 /**
  * @brief Switch to GPIO mode for blue LED (active low)
  */
@@ -286,4 +290,52 @@ void led_indicator_task(void) {
         uint32_t final_grb = ((uint32_t)g << 16) | ((uint32_t)r << 8) | b;
         ws2812_set_color(final_grb);
     }
+}
+
+void led_indicator_cycle_colors(void) {
+    if (!s_initialized) return;
+    
+    s_color_cycle_active = true;
+    s_color_index = 0;
+    
+    // Initial color: Blue LED (GPIO mode)
+    s_pattern = LED_ON;
+    s_color = LED_COLOR_BLUE;
+}
+
+void led_indicator_cycle_tick(void) {
+    if (!s_initialized || !s_color_cycle_active) return;
+    
+    // Change color every 10 ticks (1 second at 100ms interval)
+    if (s_tick_count % 10 == 0) {
+        s_color_index = (s_color_index + 1) % 4;
+        
+        switch (s_color_index) {
+            case 0: // Blue LED (GPIO mode)
+                s_pattern = LED_ON;
+                s_color = LED_COLOR_BLUE;
+                break;
+            case 1: // Red WS2812
+                s_pattern = LED_ON;
+                s_color = LED_COLOR_RED;
+                break;
+            case 2: // Green WS2812
+                s_pattern = LED_ON;
+                s_color = LED_COLOR_GREEN;
+                break;
+            case 3: // Blue WS2812
+                s_pattern = LED_ON;
+                s_color = LED_COLOR_BLUE;
+                break;
+        }
+    }
+}
+
+void blue_led_set(bool on) {
+    if (!s_initialized) return;
+    
+    // Exit color cycle mode
+    s_color_cycle_active = false;
+    
+    set_blue_led(on);
 }

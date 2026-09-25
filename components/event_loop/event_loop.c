@@ -28,6 +28,9 @@ typedef struct {
 /** @brief Handler registry for each event type */
 static handler_entry_t g_handlers[EVENT_TYPE_COUNT][MAX_HANDLERS_PER_EVENT];
 
+/** @brief Event loop task function */
+static void event_loop_task(void *arg);
+
 /** @brief Event queue handle */
 static QueueHandle_t g_event_queue = NULL;
 
@@ -36,9 +39,6 @@ static TaskHandle_t g_event_task_handle = NULL;
 
 /** @brief Whether event loop is initialized */
 static bool g_initialized = false;
-
-/** @brief Forward declaration of event loop task */
-static void event_loop_task(void *params);
 
 /**
  * @brief Event type to string mapping

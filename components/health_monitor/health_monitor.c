@@ -180,8 +180,8 @@ int health_report_status(void) {
     metrics_t metrics;
     metrics_collect(&metrics);
 
-    ESP_LOGI(TAG, "Free heap: %lu (min: %lu)", (unsigned long)metrics.free_heap_current, (unsigned long)metrics.free_heap_min);
-    ESP_LOGI(TAG, "Uptime: %u ms", (unsigned int)(esp_timer_get_time() / 1000 - g_boot_time));
+    ESP_LOGI(TAG, "Free heap: %u (min: %u)", metrics.free_heap_current, metrics.free_heap_min);
+    ESP_LOGI(TAG, "Uptime: %lu ms", (uint32_t)(esp_timer_get_time() / 1000 - g_boot_time));
 
     return 0;
 }
@@ -234,7 +234,7 @@ int metrics_export_json(char *buffer, size_t len) {
         "\"timestamp\":%lu,"
         "\"free_heap_current\":%lu,"
         "\"free_heap_min\":%lu,"
-        "\"mqtt_reconnect_count\":%lu,"
+        "\"mqtt_reconnect_count\":%d,"
         "\"mqtt_packets_sent\":%lu,"
         "\"mqtt_packets_failed\":%lu,"
         "\"sensor_read_count\":%lu,"
@@ -242,14 +242,14 @@ int metrics_export_json(char *buffer, size_t len) {
         "\"sensor_success_rate\":%.2f,"
         "\"uptime\":%llu"
         "}",
-        (unsigned long)metrics.timestamp,
-        (unsigned long)metrics.free_heap_current,
-        (unsigned long)metrics.free_heap_min,
-        (unsigned long)metrics.mqtt_reconnect_count,
-        (unsigned long)metrics.mqtt_packets_sent,
-        (unsigned long)metrics.mqtt_packets_failed,
-        (unsigned long)metrics.sensor_read_count,
-        (unsigned long)metrics.sensor_error_count,
+        metrics.timestamp,
+        metrics.free_heap_current,
+        metrics.free_heap_min,
+        metrics.mqtt_reconnect_count,
+        metrics.mqtt_packets_sent,
+        metrics.mqtt_packets_failed,
+        metrics.sensor_read_count,
+        metrics.sensor_error_count,
         metrics.sensor_success_rate,
         (unsigned long long)(esp_timer_get_time() / 1000 - g_boot_time)
     );

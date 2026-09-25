@@ -91,6 +91,23 @@ void led_indicator_set_pattern(led_pattern_t pattern, led_color_t color);
  */
 void led_indicator_task(void);
 
+/**
+ * @brief Start color cycling mode (Blue LED -> Red -> Green -> Blue(WS2812))
+ */
+void led_indicator_cycle_colors(void);
+
+/**
+ * @brief Color cycle tick (call in task loop, every 100ms)
+ * Changes color every 10 ticks (1 second)
+ */
+void led_indicator_cycle_tick(void);
+
+/**
+ * @brief Set blue LED on/off (GPIO mode)
+ * @param on true to turn on, false to turn off
+ */
+void blue_led_set(bool on);
+
 #ifdef __cplusplus
 }
 #endif

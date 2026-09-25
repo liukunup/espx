@@ -71,13 +71,8 @@ int config_manager_load(void) {
 
     // Load WiFi password (encrypted)
     size_t pwd_len = sizeof(g_config.wifi_password);
-    memset(g_config.wifi_password, 0, sizeof(g_config.wifi_password));
-    int ret = storage_get_decrypted("wifi_password", g_config.wifi_password, &pwd_len);
-    if (ret != 0) {
-        ESP_LOGI(TAG, "Password blob not found or error: %d", ret);
+    if (storage_get_decrypted("wifi_password", g_config.wifi_password, &pwd_len) != 0) {
         g_config.wifi_password[0] = '\0';
-    } else {
-        ESP_LOGI(TAG, "Password blob loaded, len=%d", (int)pwd_len);
     }
 
     storage_get_string("mqtt_broker", g_config.mqtt_broker, sizeof(g_config.mqtt_broker));

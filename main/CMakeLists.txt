@@ -2,18 +2,21 @@ idf_component_register(
     SRCS "app_main.c"
     INCLUDE_DIRS "."
     REQUIRES
-        log_system
-        nvs_storage
-        event_loop
-        network_manager
-        emqx_client
+        esp_driver_gpio
+        esp-mqtt
+        actuator_manager
         config_manager
+        emqx_client
+        event_loop
+        factory_test
         health_monitor
+        led_indicator
+        log_system
+        mqtt_wrapper
+        network_manager
+        nvs_storage
         ota_manager
         remote_cmd
-        wifi_provisioning
         sensor_manager
-        actuator_manager
-        esp_driver_gpio
-        led_indicator
+        wifi_provisioning
 )
