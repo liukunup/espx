@@ -1,10 +1,10 @@
 set(src_dirs
-    factory_test_mode
-    remote_cmd)
+    cli_service
+    factory_test_mode)
 
 set(include_dirs
-    factory_test_mode
-    remote_cmd)
+    cli_service
+    factory_test_mode)
  
 set(requires
     freertos esp_timer)

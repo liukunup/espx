@@ -2,13 +2,13 @@ set(src_dirs
     emqx_client
     mqtt_wrapper
     network_manager
-    wifi_provisioning)
+    wifi_service)
 
 set(include_dirs
     emqx_client
     mqtt_wrapper
     network_manager
-    wifi_provisioning)
+    wifi_service)
 
 set(requires
     esp_event

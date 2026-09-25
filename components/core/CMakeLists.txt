@@ -4,7 +4,7 @@ set(src_dirs
     health_monitor
     log_system
     nvs_storage
-    ota_manager)
+    ota_service)
 
 set(include_dirs
     config_manager
@@ -12,7 +12,7 @@ set(include_dirs
     health_monitor
     log_system
     nvs_storage
-    ota_manager)
+    ota_service)
 
 set(requires
     esp_http_client
