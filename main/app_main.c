@@ -22,7 +22,13 @@
 #include "health_monitor.h"
 #include "ota_manager.h"
 #include "remote_cmd.h"
+// TODO: Replace wifi_provisioning with wifi_service
+// #include "wifi_service.h"
 #include "wifi_provisioning.h"
+
+// Include new button service
+#include "button_service.h"
+
 #include "sensor_manager.h"
 #include "actuator_manager.h"
 #include "led_indicator.h"
@@ -32,6 +38,9 @@
 #define FACTORY_RESET_GPIO GPIO_NUM_12
 
 static const char *TAG = "app_main";
+
+/** @brief Factory reset button handle */
+static button_service_handle_t g_factory_reset_btn = NULL;
 
 /**
  * @brief Main application task
@@ -47,30 +56,65 @@ static void app_main_task(void *params) {
 }
 
 /**
+ * @brief Factory reset button callback
+ */
+static void factory_reset_callback(const button_service_event_t *event, void *user_data) {
+    (void)user_data;
+    
+    switch (event->type) {
+        case BUTTON_SERVICE_EVENT_LONG_PRESSED:
+            ESP_LOGI(TAG, "Factory reset: Long press detected (%ums)", event->press_duration_ms);
+            break;
+        case BUTTON_SERVICE_EVENT_CLICKED:
+            ESP_LOGI(TAG, "Factory reset: Short press (%ums)", event->press_duration_ms);
+            break;
+        default:
+            break;
+    }
+}
+
+/**
  * @brief Check GPIO12 for factory reset
  * Hold GPIO12 for 5 seconds during startup, then release to confirm
  * Flow: Hold 5s -> blink red (waiting for release) -> Release -> Erase NVS -> Restart
  * This prevents accidental reset if user keeps holding the button
  */
 static void check_factory_reset(void) {
-    gpio_reset_pin(FACTORY_RESET_GPIO);
-    gpio_set_direction(FACTORY_RESET_GPIO, GPIO_MODE_INPUT);
-    gpio_pullup_en(FACTORY_RESET_GPIO);
-    gpio_pulldown_dis(FACTORY_RESET_GPIO);
+    // Create button service for factory reset
+    button_service_config_t btn_cfg = {
+        .button_id = 0,
+        .gpio_num = FACTORY_RESET_GPIO,
+        .long_press_ms = 5000,  // 5 seconds for factory reset
+        .active_low = true,      // Active low (pull-up mode)
+    };
+    
+    g_factory_reset_btn = button_service_create(&btn_cfg);
+    if (g_factory_reset_btn == NULL) {
+        ESP_LOGE(TAG, "Failed to create factory reset button");
+        return;
+    }
+    
+    // Register callback
+    button_service_register_callback(g_factory_reset_btn, factory_reset_callback, NULL);
     
     ESP_LOGI(TAG, "Hold GPIO12 5s for factory reset...");
     led_indicator_set_status(LED_STATUS_PROV_START);  // Yellow blinking
     
     int pressed_time = 0;
     bool waiting_for_release = false;
+    bool pressed = false;
     
     while (1) {
         // Update LED state periodically
         led_indicator_task();
         
+        // Poll button state
+        button_service_poll(g_factory_reset_btn);
+        button_service_get_state(g_factory_reset_btn, &pressed);
+        
         if (!waiting_for_release) {
             // Phase 1: Wait for 5 seconds press
-            if (gpio_get_level(FACTORY_RESET_GPIO) == 0) {
+            if (pressed) {
                 pressed_time += 100;
                 if (pressed_time % 1000 == 0) {
                     ESP_LOGI(TAG, "GPIO12 pressed: %ds/5s", pressed_time / 1000);
@@ -87,6 +131,8 @@ static void check_factory_reset(void) {
                 if (pressed_time > 0) {
                     ESP_LOGI(TAG, "GPIO12 released early, cancel reset");
                     led_indicator_set_status(LED_STATUS_BOOT);
+                    button_service_delete(g_factory_reset_btn);
+                    g_factory_reset_btn = NULL;
                     return;
                 }
             }
@@ -99,7 +145,7 @@ static void check_factory_reset(void) {
             }
             
             // Check if released
-            if (gpio_get_level(FACTORY_RESET_GPIO) == 1) {
+            if (!pressed) {
                 ESP_LOGW(TAG, "GPIO12 released, starting factory reset!");
                 break;
             }
@@ -113,6 +159,12 @@ static void check_factory_reset(void) {
     led_indicator_set_pattern(LED_BLINK_FAST, LED_COLOR_RED);  // Red fast blink
     
     vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // Cleanup button service
+    if (g_factory_reset_btn != NULL) {
+        button_service_delete(g_factory_reset_btn);
+        g_factory_reset_btn = NULL;
+    }
     
     ESP_LOGW(TAG, "Erasing NVS and restarting...");
     nvs_flash_erase();

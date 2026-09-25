@@ -3,16 +3,8 @@ dependencies:
     source:
       type: idf
     version: 6.1.0
-  esp_button:
-    version: "*"
-    source:
-      type: git
-      path: https://github.com/espressif/esp-bsp
-      ref: v9.0.0
-      subdir: components/esp_button
 direct_dependencies:
 - idf
-- esp_button
 manifest_hash: e44bf68eca6b7b264ddae08cd014cd3294c0473230381b6d6f88ed18ec879038
 target: esp32s3
 version: 3.0.0
