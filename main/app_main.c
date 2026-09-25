@@ -22,11 +22,11 @@
 #include "health_monitor.h"
 #include "ota_manager.h"
 #include "remote_cmd.h"
-// TODO: Replace wifi_provisioning with wifi_service
-// #include "wifi_service.h"
-#include "wifi_provisioning.h"
 
-// Include new button service
+// Include new ESP services
+#include "wifi_service.h"
+#include "ota_service.h"
+#include "cli_service.h"
 #include "button_service.h"
 
 #include "sensor_manager.h"
@@ -221,13 +221,10 @@ void app_main(void) {
     health_monitor_init();
     ESP_LOGI(TAG, "Step 5: Health monitor initialized");
 
-    // Initialize network manager (skip if provisioning needed)
-    if (config_has_wifi()) {
-        network_manager_init();
-        ESP_LOGI(TAG, "Step 6: Network manager initialized");
-    } else {
-        ESP_LOGI(TAG, "Step 6: Skipped (provisioning mode)");
-    }
+    // Initialize Wi-Fi service
+    ESP_LOGI(TAG, "Initializing Wi-Fi service...");
+    wifi_service_init();
+    ESP_LOGI(TAG, "Step 6: Wi-Fi service initialized");
 
     // Initialize MQTT client (skip if provisioning needed)
     if (config_has_wifi()) {
@@ -237,15 +234,18 @@ void app_main(void) {
         ESP_LOGI(TAG, "Step 7: Skipped (provisioning mode)");
     }
 
-    // Initialize OTA manager
-    ESP_LOGI(TAG, "Initializing OTA manager...");
-    ota_manager_init();
-    ESP_LOGI(TAG, "Step 8: OTA manager initialized");
+    // Initialize OTA service (new)
+    ESP_LOGI(TAG, "Initializing OTA service...");
+    ota_service_init(NULL);
+    ESP_LOGI(TAG, "Step 8: OTA service initialized");
 
-    // Initialize remote command
-    ESP_LOGI(TAG, "Initializing remote command...");
-    remote_cmd_init();
-    ESP_LOGI(TAG, "Step 9: Remote command initialized");
+    // Initialize CLI service (new)
+    ESP_LOGI(TAG, "Initializing CLI service...");
+    cli_service_init(NULL);
+    ESP_LOGI(TAG, "Step 9: CLI service initialized");
+    // Start CLI in background
+    cli_service_start();
+    ESP_LOGI(TAG, "Step 9: CLI service started");
 
     // Initialize sensor manager
     ESP_LOGI(TAG, "Initializing sensor manager...");
@@ -265,11 +265,10 @@ void app_main(void) {
     // Check if provisioning is needed FIRST
     if (!config_has_wifi()) {
         ESP_LOGW(TAG, "No WiFi configuration found!");
-        ESP_LOGI(TAG, "Starting AP provisioning mode...");
+        ESP_LOGI(TAG, "Starting Wi-Fi provisioning mode...");
         
-        // Only initialize provisioning components
-        provisioning_init();
-        provisioning_start();
+        // Use new Wi-Fi service for provisioning
+        wifi_service_start_provisioning(NULL);
         
         ESP_LOGI(TAG, "Running in provisioning mode...");
         // Stay in provisioning mode forever
