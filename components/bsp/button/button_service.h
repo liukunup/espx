@@ -1,16 +1,19 @@
 /**
  * @file button_service.h
- * @brief ESP Button Service 封装层 - 使用 GPIO ISR + esp_timer
+ * @brief ESP Button Service 封装层 - 使用 espressif/button 组件
  * 
  * 提供统一的按钮事件处理接口，支持:
  * - 短按/长按检测
  * - 消抖处理
  * - 回调通知
+ * 
+ * 依赖: espressif/button ^4.2.1
  */
 
 #pragma once
 
 #include "esp_err.h"
+#include "esp_button.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"

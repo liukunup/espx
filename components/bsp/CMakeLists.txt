@@ -34,6 +34,7 @@ set(include_dirs
 
 set(requires
     driver
+    esp_button
     esp_driver_gpio
     esp_driver_ledc
     esp_driver_rmt
