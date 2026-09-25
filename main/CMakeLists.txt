@@ -5,6 +5,8 @@ idf_component_register(
         esp_driver_gpio
         esp-mqtt
         actuator_manager
+        button
+        cli_service
         config_manager
         emqx_client
         event_loop
@@ -15,8 +17,7 @@ idf_component_register(
         mqtt_wrapper
         network_manager
         nvs_storage
-        ota_manager
-        remote_cmd
+        ota_service
         sensor_manager
-        wifi_provisioning
+        wifi_service
 )

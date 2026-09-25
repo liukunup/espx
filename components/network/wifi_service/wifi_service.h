@@ -12,7 +12,6 @@
 
 #include "esp_err.h"
 #include "esp_netif_types.h"
-#include "wifi_provisioning.h"
 
 #ifdef __cplusplus
 extern "C" {

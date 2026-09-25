@@ -20,9 +20,6 @@
 #include "emqx_client.h"
 #include "config_manager.h"
 #include "health_monitor.h"
-#include "ota_manager.h"
-#include "remote_cmd.h"
-
 // Include new ESP services
 #include "wifi_service.h"
 #include "ota_service.h"

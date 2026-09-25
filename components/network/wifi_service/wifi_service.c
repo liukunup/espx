@@ -2,7 +2,7 @@
  * @file wifi_service.c
  * @brief ESP Wi-Fi Service 封装层实现
  * 
- * 使用 ESP-IDF wifi_provisioning 组件
+ * 提供简化的 Wi-Fi 配网功能
  */
 
 #include "wifi_service.h"
