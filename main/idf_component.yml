@@ -1,13 +1,13 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  ## Required IDF version
+  ## Required IDF version (esp_mqtt 1.1.0 requires >=5.3)
   idf:
-    version: '>=4.1.0'
-  ## Espressif components:
-  espressif/qrcode: ^0.2.0
-  espressif/network_provisioning: ^1.2.4
-  espressif/led_indicator: ^2.1.2
-  espressif/i2c_bus: ^1.5.2
-  espressif/esp_delta_ota: ^1.1.4
-  espressif/mqtt: ^1.1.0
-  espressif/esp_https_server: ^1.1.4
+    version: '>=5.3'
+  ## Espressif components from registry:
+  espressif/qrcode: "^0.2.0"
+  espressif/network_provisioning: "^1.2.0"
+  espressif/led_indicator: "^2.1.0"
+  espressif/i2c_bus: "^1.5.0"
+  espressif/esp_delta_ota: "^1.1.0"
+  espressif/mqtt: "^1.1.0"
+  ## Note: esp_https_server is a built-in IDF component (no download needed)

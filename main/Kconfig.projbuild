@@ -1,3 +1,62 @@
+menu "ESPX Configuration"
+
+    config ESPX
+        bool "Enable ESPX"
+        default y
+
+    config DEVICE_NAME
+        string "Device Name"
+        default "ESPX"
+        depends on ESPX
+
+    config FIRMWARE_VERSION
+        string "Firmware Version"
+        default "1.0.0"
+        depends on ESPX
+
+    config MFG_TEST_GPIO
+        int "Manufacturing Test GPIO"
+        default 0
+        depends on ESPX
+        help
+            GPIO pin to trigger test mode on boot (low = test mode)
+
+    config LED_GPIO
+        int "LED GPIO"
+        default 48
+        depends on ESPX
+        help
+            GPIO pin connected to WS2812 LED
+
+    config LED_STRIP_LENGTH
+        int "LED Strip Length"
+        default 1
+        depends on ESPX
+        help
+            Number of LEDs in the strip
+
+    config WIFI_DEFAULT_SSID
+        string "Default Wi-Fi SSID"
+        default ""
+        depends on ESPX
+
+    config WIFI_DEFAULT_PASSWORD
+        string "Default Wi-Fi Password"
+        default ""
+        depends on ESPX
+
+    config MQTT_BROKER_URL
+        string "Default MQTT Broker URL"
+        default "mqtt://localhost:1883"
+        depends on ESPX
+
+    config OTA_SERVER_URL
+        string "Default OTA Server URL"
+        default ""
+        depends on ESPX
+
+endmenu
+
 menu "Example Configuration"
 
     choice EXAMPLE_PROV_TRANSPORT

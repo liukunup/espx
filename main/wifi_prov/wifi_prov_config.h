@@ -32,7 +32,7 @@
  *   - 1 : Proof of Possession (PoP) based security with X25519 key exchange
  *   - 2 : SRP6a based authentication + AES-GCM encryption
  */
-#define WIFI_PROV_SECURITY_VERSION 1
+#define WIFI_PROV_SECURITY_VERSION 2
 
 /**
  * @brief Proof of Possession (PoP) string for Security 1

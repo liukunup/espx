@@ -10,7 +10,7 @@
 #include <esp_log.h>
 
 #include "mfg_provision.h"
-#include "param_store/param_store.h"
+#include "param_store.h"
 
 static const char *TAG = "mfg_provision";
 

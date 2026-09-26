@@ -19,6 +19,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.1.1
+  espressif/esp_delta_ota:
+    component_hash: 147161b602ef51e9f6649eb6d90c4d4ac3c94228cb264fa0e68be7877180462d
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.4
   espressif/i2c_bus:
     component_hash: 483112c1619c54c38d0b734fb25f1678733267858a77b7af2f48cc7db6dbbd84
     dependencies:
@@ -61,6 +71,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 3.0.3
+  espressif/mqtt:
+    component_hash: fb18bc3b65aa8c94693a9811ffc322cca8a65d92d5ec84983d3e385080e3969c
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.0
   espressif/network_provisioning:
     component_hash: 72d27784e3daf807418a34fb00be136ec50c6db49d989ce981d22e031fc0e7f8
     dependencies:
@@ -89,11 +109,13 @@ dependencies:
       type: idf
     version: 6.1.0
 direct_dependencies:
+- espressif/esp_delta_ota
 - espressif/i2c_bus
 - espressif/led_indicator
+- espressif/mqtt
 - espressif/network_provisioning
 - espressif/qrcode
 - idf
-manifest_hash: 584350b399566e050ec6b91b214a58ee9fee9ca089e0856a8b23f708beb656f6
+manifest_hash: 6486f71daa0759c1bf67d7eec83e6b8e3faf3703a9c0aff10b66bf614758a1bd
 target: esp32s3
 version: 3.0.0

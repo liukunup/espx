@@ -1,265 +1,204 @@
 /**
  * @file led_driver.c
- * @brief LED Driver implementation using led_indicator
+ * @brief LED Driver for WS2812 RGB LED using led_strip component
  */
 
-#include <stdio.h>
 #include <string.h>
-
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <driver/gpio.h>
-#include <led_indicator.h>
-
+#include <stdint.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "led_driver.h"
+#include "led_strip.h"
 
-static const char *TAG = "led_driver";
-
-// LED configuration - using GPIO 48 on ESP32-S3
-// Adjust based on actual hardware
 #ifndef CONFIG_LED_GPIO
 #define CONFIG_LED_GPIO 48
 #endif
 
-static led_indicator_handle_t g_led_handle = NULL;
+#ifndef CONFIG_LED_STRIP_LENGTH
+#define CONFIG_LED_STRIP_LENGTH 1
+#endif
 
-// LED states
-typedef enum {
-    LED_STATE_OFF = 0,
-    LED_STATE_RED,
-    LED_STATE_GREEN,
-    LED_STATE_BLUE,
-    LED_STATE_WHITE,
-    LED_STATE_YELLOW,
-    LED_STATE_CYAN,
-    LED_STATE_MAGENTA,
-    LED_STATE_BLINK_RED,
-    LED_STATE_BLINK_GREEN,
-    LED_STATE_BREATHE,
-} led_state_t;
+static led_strip_handle_t g_led_strip = NULL;
+static bool g_initialized = false;
 
-// LED blink durations
-static const int BLINK_PERIOD = 1000;  // ms
+static TaskHandle_t g_blink_task = NULL;
+static volatile bool g_blink_running = false;
 
-// LED states configuration for led_indicator
-static const led_indicator_state_t led_states[] = {
-    [LED_STATE_OFF] = {
-        .hold_on_state = 0,
-        .hold_off_state = 0,
-    },
-    [LED_STATE_RED] = {
-        .hold_on_state = -1,  // Always on
-    },
-    [LED_STATE_GREEN] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_BLUE] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_WHITE] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_YELLOW] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_CYAN] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_MAGENTA] = {
-        .hold_on_state = -1,
-    },
-    [LED_STATE_BLINK_RED] = {
-        .hold_on_state = 200,
-        .hold_off_state = 200,
-        .brightness = 255,
-    },
-    [LED_STATE_BLINK_GREEN] = {
-        .hold_on_state = 200,
-        .hold_off_state = 200,
-        .brightness = 255,
-    },
-    [LED_STATE_BREATHE] = {
-        .hold_on_state = 2000,
-        .hold_off_state = 2000,
-        .brightness = -1,
-    },
-};
+static void blink_task(void *pvParameters)
+{
+    int blink_type = (int)pvParameters;
+    bool led_state = false;
 
-static const char *led_state_names[] = {
-    [LED_STATE_OFF] = "OFF",
-    [LED_STATE_RED] = "RED",
-    [LED_STATE_GREEN] = "GREEN",
-    [LED_STATE_BLUE] = "BLUE",
-    [LED_STATE_WHITE] = "WHITE",
-    [LED_STATE_YELLOW] = "YELLOW",
-    [LED_STATE_CYAN] = "CYAN",
-    [LED_STATE_MAGENTA] = "MAGENTA",
-    [LED_STATE_BLINK_RED] = "BLINK_RED",
-    [LED_STATE_BLINK_GREEN] = "BLINK_GREEN",
-    [LED_STATE_BREATHE] = "BREATHE",
-};
+    while (g_blink_running) {
+        led_state = !led_state;
 
-static led_state_t g_current_state = LED_STATE_OFF;
+        if (led_state) {
+            if (blink_type == 1) {
+                led_strip_set_pixel(g_led_strip, 0, 0, 255, 0); // Green
+            } else {
+                led_strip_set_pixel(g_led_strip, 0, 255, 0, 0); // Red
+            }
+        } else {
+            led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+        }
 
-// Public API implementation
+        led_strip_refresh(g_led_strip);
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
+
+    g_blink_task = NULL;
+    vTaskDelete(NULL);
+}
+
 esp_err_t led_driver_init(void)
 {
-    ESP_LOGI(TAG, "Initializing LED driver on GPIO %d", CONFIG_LED_GPIO);
-
-    // Configure GPIO
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << CONFIG_LED_GPIO),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-
-    gpio_config(&io_conf);
-
-    // Initialize led_indicator
-    led_indicator_config_t config = {
-        .mode = LED_MODE_GPIO,
-        .gpio_num = CONFIG_LED_GPIO,
-    };
-
-    g_led_handle = led_indicator_create(&config);
-    if (g_led_handle == NULL) {
-        ESP_LOGE(TAG, "Failed to create LED indicator");
-        return ESP_FAIL;
+    if (g_initialized) {
+        return ESP_OK;
     }
 
-    // Add states
-    for (int i = 0; i < sizeof(led_states) / sizeof(led_states[0]); i++) {
-        led_indicator_add_state(g_led_handle, i, &led_states[i]);
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = CONFIG_LED_GPIO,
+        .max_leds = CONFIG_LED_STRIP_LENGTH,
+        .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        .flags.invert_out = false,
+    };
+
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,
+        .mem_block_symbols = 64,
+    };
+
+    esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &g_led_strip);
+    if (err != ESP_OK) {
+        return err;
     }
 
-    ESP_LOGI(TAG, "LED driver initialized");
+    led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+    led_strip_refresh(g_led_strip);
 
+    g_initialized = true;
     return ESP_OK;
 }
 
 esp_err_t led_set_color(uint8_t r, uint8_t g, uint8_t b)
 {
-    if (g_led_handle == NULL) {
+    if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Determine color state
-    led_state_t state = LED_STATE_OFF;
-
-    if (r > 0 && g == 0 && b == 0) {
-        state = LED_STATE_RED;
-    } else if (r == 0 && g > 0 && b == 0) {
-        state = LED_STATE_GREEN;
-    } else if (r == 0 && g == 0 && b > 0) {
-        state = LED_STATE_BLUE;
-    } else if (r > 0 && g > 0 && b == 0) {
-        state = LED_STATE_YELLOW;
-    } else if (r == 0 && g > 0 && b > 0) {
-        state = LED_STATE_CYAN;
-    } else if (r > 0 && g == 0 && b > 0) {
-        state = LED_STATE_MAGENTA;
-    } else if (r > 0 && g > 0 && b > 0) {
-        state = LED_STATE_WHITE;
+    if (g_blink_running) {
+        g_blink_running = false;
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    // Set LED state
-    if (state != LED_STATE_OFF) {
-        led_indicator_start(g_led_handle, state);
-    } else {
-        led_indicator_stop(g_led_handle, g_current_state);
-    }
-
-    g_current_state = state;
-
-    ESP_LOGD(TAG, "LED color set: R=%d G=%d B=%d -> %s", r, g, b, led_state_names[state]);
+    led_strip_set_pixel(g_led_strip, 0, r, g, b);
+    led_strip_refresh(g_led_strip);
 
     return ESP_OK;
 }
 
 esp_err_t led_set_brightness(uint8_t brightness)
 {
-    // Brightness control would require PWM or RGB LED driver
-    // For now, just use full brightness
-    ESP_LOGD(TAG, "Brightness set to %d%%", brightness);
     return ESP_OK;
 }
 
 esp_err_t led_set_pattern(led_pattern_t pattern, uint32_t period)
 {
-    if (g_led_handle == NULL) {
+    if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    led_state_t state;
+    if (g_blink_running) {
+        g_blink_running = false;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 
     switch (pattern) {
     case LED_PATTERN_NONE:
-        state = LED_STATE_OFF;
+        led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+        led_strip_refresh(g_led_strip);
         break;
     case LED_PATTERN_BLINK:
-        state = LED_STATE_BLINK_GREEN;
+        g_blink_running = true;
+        xTaskCreate(blink_task, "blink_task", 2048, (void*)1, 2, &g_blink_task);
         break;
     case LED_PATTERN_BREATHE:
-        state = LED_STATE_BREATHE;
-        break;
     case LED_PATTERN_PULSE:
-        state = LED_STATE_BREATHE;
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j <= 255; j += 15) {
+                led_strip_set_pixel(g_led_strip, 0, 0, j, 0);
+                led_strip_refresh(g_led_strip);
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            for (int j = 255; j >= 0; j -= 15) {
+                led_strip_set_pixel(g_led_strip, 0, 0, j, 0);
+                led_strip_refresh(g_led_strip);
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+        }
+        led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+        led_strip_refresh(g_led_strip);
         break;
     default:
-        return ESP_ERR_INVALID_ARG;
+        break;
     }
-
-    led_indicator_start(g_led_handle, state);
-    g_current_state = state;
-
-    ESP_LOGI(TAG, "LED pattern set: %d", pattern);
 
     return ESP_OK;
 }
 
 esp_err_t led_stop_pattern(void)
 {
-    if (g_led_handle == NULL) {
+    if (!g_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    led_indicator_stop(g_led_handle, g_current_state);
-    g_current_state = LED_STATE_OFF;
+    if (g_blink_running) {
+        g_blink_running = false;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+    led_strip_refresh(g_led_strip);
 
     return ESP_OK;
 }
 
 esp_err_t led_set_status(const char *status)
 {
-    if (g_led_handle == NULL) {
+    if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    led_state_t state = LED_STATE_OFF;
-
-    if (strcmp(status, "connected") == 0 || strcmp(status, "wifi_connected") == 0) {
-        state = LED_STATE_GREEN;
-    } else if (strcmp(status, "disconnected") == 0 || strcmp(status, "wifi_disconnected") == 0) {
-        state = LED_STATE_RED;
-    } else if (strcmp(status, "error") == 0 || strcmp(status, "ota_failed") == 0) {
-        state = LED_STATE_BLINK_RED;
-    } else if (strcmp(status, "ota_progress") == 0 || strcmp(status, "updating") == 0) {
-        state = LED_STATE_BREATHE;
-    } else if (strcmp(status, "provisioning") == 0) {
-        state = LED_STATE_BLINK_GREEN;
+    if (g_blink_running) {
+        g_blink_running = false;
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    led_indicator_start(g_led_handle, state);
-    g_current_state = state;
+    if (strcmp(status, "connected") == 0 || strcmp(status, "wifi_connected") == 0) {
+        led_strip_set_pixel(g_led_strip, 0, 0, 255, 0);
+    } else if (strcmp(status, "disconnected") == 0 || strcmp(status, "wifi_disconnected") == 0) {
+        led_strip_set_pixel(g_led_strip, 0, 255, 0, 0);
+    } else if (strcmp(status, "error") == 0 || strcmp(status, "ota_failed") == 0) {
+        g_blink_running = true;
+        xTaskCreate(blink_task, "blink_task", 2048, (void*)2, 2, &g_blink_task);
+        return ESP_OK;
+    } else if (strcmp(status, "ota_progress") == 0 || strcmp(status, "updating") == 0) {
+        led_strip_set_pixel(g_led_strip, 0, 0, 0, 255);
+    } else if (strcmp(status, "provisioning") == 0) {
+        g_blink_running = true;
+        xTaskCreate(blink_task, "blink_task", 2048, (void*)2, 2, &g_blink_task);
+        return ESP_OK;
+    } else {
+        led_strip_set_pixel(g_led_strip, 0, 0, 0, 0);
+    }
 
-    ESP_LOGI(TAG, "LED status set: %s -> %s", status, led_state_names[state]);
-
+    led_strip_refresh(g_led_strip);
     return ESP_OK;
 }
 
 esp_err_t led_off(void)
 {
-    return led_set_color(0, 0, 0);
+    return led_set_pattern(LED_PATTERN_NONE, 0);
 }

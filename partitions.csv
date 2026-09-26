@@ -1,9 +1,10 @@
 # Name,   Type, SubType, Offset,  Size, Flags
 # Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
+# ESP32-S3 with 8MB flash: 3x 2MB app slots + data partitions
 nvs,      data, nvs,     ,      0x6000,
 phy_init, data, phy,     ,      0x1000,
-factory,  app,  factory, ,      0x100000,
-ota_0,    app,  ota_0,   ,      0x100000,
-ota_1,    app,  ota_1,   ,      0x100000,
+factory,  app,  factory, ,      0x200000,
+ota_0,    app,  ota_0,   ,      0x200000,
+ota_1,    app,  ota_1,   ,      0x200000,
 certs,    data, fat,     ,      0x4000,
 mfg_data, data, nvs,     ,      0x4000,
