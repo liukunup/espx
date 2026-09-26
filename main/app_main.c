@@ -1,9 +1,13 @@
-/* Application Main Entry
-
-   This example demonstrates how to use the wifi_prov component
-   for Wi-Fi provisioning with configurable parameters.
+/* ESPX Application Main Entry
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
+
+   Features:
+   - HTTPS Web Server for device management
+   - MQTT Client for cloud communication
+   - Delta OTA for firmware updates
+   - Manufacturing Provisioning support
+   - Production test mode
 */
 
 #include <stdio.h>
@@ -11,104 +15,114 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <nvs_flash.h>
+#include <esp_system.h>
 
-#include "wifi_prov/wifi_prov.h"
+#include "app/app.h"
+#include "param_store/param_store.h"
+#include "cert_manager/cert_manager.h"
+#include "led_driver.h"
+#include "web_server/web_server.h"
+#include "mqtt_client/mqtt_client.h"
+#include "ota_service/ota_service.h"
+#include "mfg_provision/mfg_provision.h"
+#include "test_mode/test_mode.h"
 
-static const char *TAG = "app";
+static const char *TAG = "app_main";
 
-/* ============================================
- * Application Task
- * ============================================ */
-
-#if WIFI_PROV_REPROVISIONING
-static void app_task(void *arg)
+/**
+ * @brief Print startup banner
+ */
+static void print_banner(void)
 {
-    while (1) {
-        ESP_LOGI(TAG, "Hello World!");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    printf("\n");
+    printf("================================================\n");
+    printf("           ESPX IoT Device Firmware\n");
+    printf("================================================\n");
+    printf("  Version  : %s\n", CONFIG_FIRMWARE_VERSION);
+    printf("  Device   : %s\n", CONFIG_DEVICE_NAME);
+    printf("  Chip     : ESP32-S3\n");
+    printf("  Build    : %s %s\n", __DATE__, __TIME__);
+    printf("================================================\n");
+    printf("\n");
 }
-#endif
-
-/* ============================================
- * Optional: Custom Application Callback
- * ============================================ */
-
-#if WIFI_PROV_ENABLE_APP_CALLBACK
-
-static void app_wifi_prov_callback(void *user_data, wifi_prov_event_t event, void *event_data)
-{
-    switch (event) {
-    case WIFI_PROV_EVENT_WIFI_CRED_RECV:
-        ESP_LOGI(TAG, "App callback: Wi-Fi credentials received");
-        break;
-
-    case WIFI_PROV_EVENT_WIFI_CRED_SUCCESS:
-        ESP_LOGI(TAG, "App callback: Wi-Fi credentials accepted");
-        break;
-
-    case WIFI_PROV_EVENT_WIFI_CRED_FAIL:
-        ESP_LOGI(TAG, "App callback: Wi-Fi credentials failed");
-        break;
-
-    case WIFI_PROV_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "App callback: Wi-Fi connected");
-        break;
-
-    case WIFI_PROV_EVENT_PROVISIONING_END:
-        ESP_LOGI(TAG, "App callback: Provisioning ended");
-        break;
-
-    default:
-        break;
-    }
-}
-
-static wifi_prov_event_handler_t app_handler = {
-    .event_cb = app_wifi_prov_callback,
-    .user_data = NULL,
-};
-
-#endif /* WIFI_PROV_ENABLE_APP_CALLBACK */
-
-/* ============================================
- * Main Entry Point
- * ============================================ */
 
 void app_main(void)
 {
-    /* Initialize Wi-Fi provisioning */
+    // Print banner
+    print_banner();
+
+    // 1. Check for test mode trigger (GPIO low on boot)
+    if (test_mode_check_trigger() == ESP_OK) {
+        ESP_LOGI(TAG, "Test mode triggered, entering...");
+        test_mode_enter();
+        // Never returns
+    }
+
+    // 2. Initialize NVS
+    ESP_LOGI(TAG, "Initializing NVS...");
+    ESP_ERROR_CHECK(nvs_flash_init());
+
+    // 3. Initialize parameter store
+    ESP_LOGI(TAG, "Initializing parameter store...");
+    ESP_ERROR_CHECK(param_store_init());
+
+    // 4. Load manufacturing data if available
+    if (mfg_provision_has_data()) {
+        ESP_LOGI(TAG, "Manufacturing data found, loading...");
+        if (mfg_provision_load() == ESP_OK) {
+            ESP_LOGI(TAG, "Manufacturing data loaded successfully");
+        }
+    }
+
+    // 5. Initialize LED driver
+    ESP_LOGI(TAG, "Initializing LED driver...");
+    ESP_ERROR_CHECK(led_driver_init());
+    led_set_status("connected");  // Default status
+
+    // 6. Initialize certificate manager
+    ESP_LOGI(TAG, "Initializing certificate manager...");
+    if (cert_manager_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize certificates");
+    }
+
+    // 7. Initialize Wi-Fi provisioning
+    ESP_LOGI(TAG, "Initializing Wi-Fi provisioning...");
     ESP_ERROR_CHECK(wifi_prov_init());
 
-    /* Start provisioning (checks if already provisioned) */
-#if WIFI_PROV_ENABLE_APP_CALLBACK
-    ESP_ERROR_CHECK(wifi_prov_start(&app_handler));
-#else
+    // Start provisioning (checks if already provisioned)
+    ESP_LOGI(TAG, "Starting Wi-Fi provisioning...");
     ESP_ERROR_CHECK(wifi_prov_start(NULL));
-#endif
 
-    /* Wait for Wi-Fi connection */
+    // Wait for Wi-Fi connection
     wifi_prov_wait_for_connection();
 
-    ESP_LOGI(TAG, "Wi-Fi connected! Starting application...");
+    ESP_LOGI(TAG, "Wi-Fi connected!");
 
-#if WIFI_PROV_REPROVISIONING
-    /* Create application task with reprovisioning support */
-    xTaskCreate(app_task, "app_task", 4096, NULL, 2, NULL);
+    // 8. Initialize MQTT client
+    ESP_LOGI(TAG, "Initializing MQTT client...");
+    ESP_ERROR_CHECK(mqtt_client_init());
+    ESP_ERROR_CHECK(mqtt_client_start());
 
-    /* Periodically reset provisioning state for re-provisioning test */
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(10000));
-        ESP_LOGI(TAG, "Checking if re-provisioning is needed...");
-        /* In production, implement your own logic to trigger reprovisioning */
+    // 9. Initialize and start HTTPS Web server
+    ESP_LOGI(TAG, "Starting HTTPS Web server...");
+    if (web_server_start() == ESP_OK) {
+        ESP_LOGI(TAG, "HTTPS server started successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to start HTTPS server");
     }
-#else
-    /* Main application loop */
-    while (1) {
-        ESP_LOGI(TAG, "Hello World!");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-#endif
+
+    // 10. Initialize OTA service
+    ESP_LOGI(TAG, "Initializing OTA service...");
+    ESP_ERROR_CHECK(ota_service_init());
+
+    ESP_LOGI(TAG, "================================================");
+    ESP_LOGI(TAG, "ESPX device started successfully!");
+    ESP_LOGI(TAG, "Access the web interface at: https://<device-ip>");
+    ESP_LOGI(TAG, "================================================");
+
+    // Main application loop
+    app_loop();
 }
