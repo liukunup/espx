@@ -97,6 +97,8 @@ idf_component_register(
         protocomm
         qrcode
         driver
+        esp_driver_twai
+        esp_driver_i2c
         led_driver
         led_strip
         cjson

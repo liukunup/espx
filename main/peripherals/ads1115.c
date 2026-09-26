@@ -32,7 +32,8 @@ static const int ADS1115_RATE[8] = {8, 16, 32, 64, 128, 250, 475, 860};
 static const uint8_t ADS1115_MUX_SINGLE[4] = {0x04, 0x05, 0x06, 0x07};
 
 typedef struct {
-    i2c_port_t i2c_port;
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t dev;
     uint8_t i2c_addr;
     int channel;          /* 0-3 single-ended vs GND */
     int gain;             /* PGA gain code 0-7 */
@@ -60,19 +61,15 @@ static esp_err_t ads1115_trigger_read(ads1115_data_t *data)
         (uint8_t)(config >> 8),
         (uint8_t)(config & 0xFF),
     };
-    return esp_idf_i2c_write(data->i2c_port, data->i2c_addr, cmd, 3);
+    return esp_idf_i2c_write(data->dev, cmd, 3);
 }
 
 static esp_err_t ads1115_read_raw(ads1115_data_t *data, int16_t *out_raw)
 {
     uint8_t reg = ADS1115_REG_CONVERSION;
-    esp_err_t err = esp_idf_i2c_write(data->i2c_port, data->i2c_addr, &reg, 1);
-    if (err != ESP_OK) return err;
-
     uint8_t buf[2];
-    err = esp_idf_i2c_read(data->i2c_port, data->i2c_addr, buf, 2);
+    esp_err_t err = esp_idf_i2c_write_read(data->dev, &reg, 1, buf, 2);
     if (err != ESP_OK) return err;
-
     *out_raw = (int16_t)((buf[0] << 8) | buf[1]);
     return ESP_OK;
 }
@@ -106,11 +103,14 @@ static esp_err_t ads1115_init(device_t *dev, const cJSON *config)
     if (cJSON_IsNumber(ch))   data->channel = ch->valueint;
     if (cJSON_IsNumber(gn))   data->gain = gn->valueint;
     if (cJSON_IsNumber(rt))   data->rate = rt->valueint;
-    if (cJSON_IsNumber(iv))   data->interval_ms = iv->valueint;
+    if (cJSON_IsNumber(iv))    data->interval_ms = iv->valueint;
 
     uint32_t scl_freq = cJSON_IsNumber(freq) ? freq->valueint : 400000;
 
-    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->i2c_port);
+    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->bus);
+    if (err != ESP_OK) { free(data); return err; }
+
+    err = esp_idf_i2c_add_device(data->bus, data->i2c_addr, &data->dev);
     if (err != ESP_OK) { free(data); return err; }
 
     dev->driver_data = data;

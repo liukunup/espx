@@ -18,8 +18,8 @@
 static const char *TAG = "mcp4725";
 
 typedef struct {
-    i2c_port_t i2c_port;
-    uint8_t i2c_addr;
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t dev;
     uint16_t value;      /* Cached DAC value (0-4095) */
     int vref_mv;         /* Reference voltage in mV */
 } mcp4725_data_t;
@@ -35,7 +35,7 @@ static esp_err_t mcp4725_write_value(mcp4725_data_t *data, uint16_t value, bool 
         (uint8_t)((value & 0x0F) << 4),
     };
 
-    return esp_idf_i2c_write(data->i2c_port, data->i2c_addr, buf, sizeof(buf));
+    return esp_idf_i2c_write(data->dev, buf, sizeof(buf));
 }
 
 static esp_err_t mcp4725_init(device_t *dev, const cJSON *config)
@@ -49,28 +49,28 @@ static esp_err_t mcp4725_init(device_t *dev, const cJSON *config)
     mcp4725_data_t *data = calloc(1, sizeof(mcp4725_data_t));
     if (!data) return ESP_ERR_NO_MEM;
 
-    data->i2c_addr = 0x60;
+    uint8_t addr = 0x60;
     data->vref_mv = 3300;
     data->value = 0;
 
-    cJSON *addr = cJSON_GetObjectItem(config, "i2c_addr");
-    cJSON *vref = cJSON_GetObjectItem(config, "vref_mv");
-    cJSON *freq = cJSON_GetObjectItem(config, "scl_freq");
+    cJSON *addr_n = cJSON_GetObjectItem(config, "i2c_addr");
+    cJSON *vref  = cJSON_GetObjectItem(config, "vref_mv");
+    cJSON *freq  = cJSON_GetObjectItem(config, "scl_freq");
 
-    if (cJSON_IsNumber(addr)) data->i2c_addr = (uint8_t)addr->valueint;
+    if (cJSON_IsNumber(addr_n)) addr = (uint8_t)addr_n->valueint;
     if (cJSON_IsNumber(vref)) data->vref_mv = vref->valueint;
 
     uint32_t scl_freq = cJSON_IsNumber(freq) ? freq->valueint : 400000;
 
-    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->i2c_port);
-    if (err != ESP_OK) {
-        free(data);
-        return err;
-    }
+    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->bus);
+    if (err != ESP_OK) { free(data); return err; }
+
+    err = esp_idf_i2c_add_device(data->bus, addr, &data->dev);
+    if (err != ESP_OK) { free(data); return err; }
 
     dev->driver_data = data;
     ESP_LOGI(TAG, "MCP4725 init: SDA=GPIO%d SCL=GPIO%d addr=0x%02X vref=%dmV",
-             sda->valueint, scl->valueint, data->i2c_addr, data->vref_mv);
+             sda->valueint, scl->valueint, addr, data->vref_mv);
     return ESP_OK;
 }
 

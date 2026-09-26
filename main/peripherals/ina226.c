@@ -27,7 +27,8 @@ static const char *TAG = "ina226";
 #define INA226_REG_CAL         0x05
 
 typedef struct {
-    i2c_port_t i2c_port;
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t dev;
     uint8_t i2c_addr;
     float r_shunt;          /* mΩ */
     float current_lsb;      /* A per LSB */
@@ -48,15 +49,13 @@ typedef struct {
 static esp_err_t ina226_write_reg(ina226_data_t *data, uint8_t reg, uint16_t val)
 {
     uint8_t buf[3] = {reg, (uint8_t)(val >> 8), (uint8_t)(val & 0xFF)};
-    return esp_idf_i2c_write(data->i2c_port, data->i2c_addr, buf, 3);
+    return esp_idf_i2c_write(data->dev, buf, 3);
 }
 
 static esp_err_t ina226_read_reg(ina226_data_t *data, uint8_t reg, uint16_t *out_val)
 {
-    esp_err_t err = esp_idf_i2c_write(data->i2c_port, data->i2c_addr, &reg, 1);
-    if (err != ESP_OK) return err;
     uint8_t buf[2];
-    err = esp_idf_i2c_read(data->i2c_port, data->i2c_addr, buf, 2);
+    esp_err_t err = esp_idf_i2c_write_read(data->dev, &reg, 1, buf, 2);
     if (err != ESP_OK) return err;
     *out_val = (uint16_t)((buf[0] << 8) | buf[1]);
     return ESP_OK;
@@ -103,7 +102,10 @@ static esp_err_t ina226_init(device_t *dev, const cJSON *config)
 
     uint32_t scl_freq = cJSON_IsNumber(freq) ? freq->valueint : 400000;
 
-    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->i2c_port);
+    esp_err_t err = esp_idf_i2c_init(sda->valueint, scl->valueint, scl_freq, &data->bus);
+    if (err != ESP_OK) { free(data); return err; }
+    err = esp_idf_i2c_add_device(data->bus, data->i2c_addr, &data->dev);
+    if (err != ESP_OK) { free(data); return err; }
     if (err != ESP_OK) { free(data); return err; }
 
     /* Calculate Current_LSB = MaxCurrent / 32768 */
