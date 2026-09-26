@@ -817,6 +817,18 @@ esp_err_t at_service_start(void)
         return err;
     }
 
+    /* Only set the pins when the AT UART is NOT the console UART. Re-pinning
+     * the console's UART would move the log output to the AT pins, which
+     * silently breaks the "temporarily put AT on UART0 to debug" workflow and
+     * leaves the console on pins nothing is listening to. */
+#if (CONFIG_ESPX_AT_UART_NUM == CONFIG_ESP_CONSOLE_UART_NUM) && \
+    defined(CONFIG_ESP_CONSOLE_UART_DEFAULT)
+    ESP_LOGW(TAG, "AT shares the console UART (UART%d); keeping its pins %d/%d. "
+                  "Log output will interleave with AT replies -- use this for "
+                  "manual debugging only.",
+             CONFIG_ESPX_AT_UART_NUM, CONFIG_ESP_CONSOLE_UART_TX_GPIO,
+             CONFIG_ESP_CONSOLE_UART_RX_GPIO);
+#else
     err = uart_set_pin(AT_UART, CONFIG_ESPX_AT_UART_TX_GPIO,
                        CONFIG_ESPX_AT_UART_RX_GPIO,
                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
@@ -824,6 +836,7 @@ esp_err_t at_service_start(void)
         ESP_LOGE(TAG, "uart_set_pin failed: %s", esp_err_to_name(err));
         return err;
     }
+#endif
 
     s_running = true;
     if (xTaskCreate(at_task, "at_service", 6144, NULL, 5, &s_task) != pdPASS) {
