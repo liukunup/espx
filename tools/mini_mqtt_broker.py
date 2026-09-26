@@ -118,17 +118,20 @@ class Broker:
 
         elif pkt_type == PUBLISH:
             qos = (flags >> 1) & 0x03
+            retain = bool(flags & 0x01)
             tlen = struct.unpack_from("!H", payload, 0)[0]
             topic = payload[2:2 + tlen].decode(errors="replace")
             i = 2 + tlen
             if qos:
                 i += 2
             body = payload[i:]
-            self.log(f"PUBLISH id={cl.client_id} topic={topic} qos={qos} len={len(body)}")
+            self.log(f"PUBLISH id={cl.client_id} topic={topic} qos={qos} retain={retain} len={len(body)}")
             if qos == 1:
                 mid = struct.unpack_from("!H", payload, 2 + tlen)[0]
                 cl.send_raw(bytes([PUBACK << 4, 2]) + struct.pack("!H", mid))
-            self.publish(topic, body, exclude=cl, qos=qos)
+            self.publish(topic, body, exclude=cl, qos=qos, retain=retain)
+            if self.verbose:
+                print(f"    payload: {body[:200]!r}", flush=True)
             if self.verbose:
                 print(f"    payload: {body[:200]!r}", flush=True)
 

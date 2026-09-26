@@ -40,6 +40,17 @@ static void print_banner(void)
     printf("================================================\n\n");
 }
 
+/**
+ * @brief Report the Wi-Fi connection without blocking startup
+ */
+static void wifi_status_task(void *arg)
+{
+    wifi_prov_wait_for_connection();
+    ESP_LOGI(TAG, "Wi-Fi connected");
+    led_set_status("connected");
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     print_banner();
@@ -102,15 +113,14 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(err));
     }
 
-    ESP_LOGI(TAG, "Waiting for Wi-Fi connection...");
-    wifi_prov_wait_for_connection();
-    ESP_LOGI(TAG, "Wi-Fi connected");
-
     /* ---- 8. Status LED -------------------------------------------------- */
     ESP_ERROR_CHECK(led_driver_init());
-    led_set_status("connected");
 
     /* ---- 9. MQTT -------------------------------------------------------- */
+    /* Deliberately not gated on a station connection: esp-mqtt retries until
+     * the network is up, so a node whose Wi-Fi is down (or one that is still
+     * only serving its own SoftAP) keeps its services alive instead of
+     * stalling in a blocking wait. */
     ESP_LOGI(TAG, "Initializing MQTT...");
     ESP_ERROR_CHECK(mqtt_client_init());
     ESP_ERROR_CHECK(mqtt_commander_init());
@@ -128,9 +138,14 @@ void app_main(void)
     ESP_LOGI(TAG, "ESPX ready — device id %s, %d device(s) bound",
              node_config_get_device_id(), (int)device_get_count());
     ESP_LOGI(TAG, "Web UI: https://<device-ip>/  (self-signed certificate)");
+    ESP_LOGI(TAG, "Config: POST /api/config or MQTT <prefix>/cmd/config (YAML)");
     ESP_LOGI(TAG, "================================================");
 
     event_bus_publish(EVENT_NODE_READY, NULL, NULL);
+
+    /* ---- 11. Report the Wi-Fi connection when it arrives ---------------- */
+    /* In its own task so it can never gate the services above. */
+    xTaskCreate(wifi_status_task, "wifi_status", 3072, NULL, 3, NULL);
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

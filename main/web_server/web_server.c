@@ -23,6 +23,7 @@
 #include "node_config.h"
 #include "device_manager.h"
 #include "device_type.h"
+#include "config_apply.h"
 #include "ota_service/ota_service.h"
 #include "cert_manager/cert_manager.h"
 #include "test_mode/test_mode.h"
@@ -399,6 +400,67 @@ static esp_err_t api_device_types_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief POST /api/config - apply a configuration document (YAML or JSON)
+ *
+ * Body: the document itself (Content-Type: text/yaml or application/json).
+ * Same semantics as the MQTT {prefix}/cmd/config interface.
+ */
+static esp_err_t api_config_apply_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 4096) {
+        return send_error(req, "missing or oversized configuration body", 400);
+    }
+
+    char *buf = malloc(req->content_len + 1);
+    if (buf == NULL) {
+        return send_error(req, "out of memory", 500);
+    }
+
+    int received = 0;
+    while (received < req->content_len) {
+        int r = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (r <= 0) {
+            free(buf);
+            return send_error(req, "failed to read body", 400);
+        }
+        received += r;
+    }
+    buf[received] = '\0';
+
+    config_apply_result_t res;
+    char err[128] = {0};
+    esp_err_t rc = config_apply_payload(buf, &res, err, sizeof(err));
+    free(buf);
+
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddBoolToObject(out, "ok", rc == ESP_OK && res.devices_failed == 0);
+
+    cJSON *counts = cJSON_AddObjectToObject(out, "applied");
+    cJSON_AddNumberToObject(counts, "added", res.devices_added);
+    cJSON_AddNumberToObject(counts, "updated", res.devices_updated);
+    cJSON_AddNumberToObject(counts, "removed", res.devices_removed);
+    cJSON_AddNumberToObject(counts, "failed", res.devices_failed);
+
+    cJSON_AddBoolToObject(out, "reboot_required", res.reboot_recommended);
+    const char *msg = res.error[0] ? res.error : err;
+    if (msg[0]) cJSON_AddStringToObject(out, "error", msg);
+
+    return send_json(req, out, rc == ESP_OK ? 200 : 400);
+}
+
+/**
+ * @brief GET /api/config - current configuration as JSON
+ */
+static esp_err_t api_config_get_handler(httpd_req_t *req)
+{
+    cJSON *cfg = config_export();
+    if (cfg == NULL) {
+        return send_error(req, "failed to export configuration", 500);
+    }
+    return send_json(req, cfg, 200);
+}
+
+/**
  * @brief GET /api/system/info - runtime info
  */
 static esp_err_t api_system_info_handler(httpd_req_t *req)
@@ -633,6 +695,8 @@ esp_err_t web_server_start(void)
         { .uri = "/api/devices",        .method = HTTP_POST,   .handler = api_device_add_handler },
         { .uri = "/api/devices/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },
         { .uri = "/api/device-types",   .method = HTTP_GET,    .handler = api_device_types_handler },
+        { .uri = "/api/config",         .method = HTTP_GET,    .handler = api_config_get_handler },
+        { .uri = "/api/config",         .method = HTTP_POST,   .handler = api_config_apply_handler },
         { .uri = "/api/ota/status",     .method = HTTP_GET,    .handler = api_ota_status_handler },
         { .uri = "/api/ota/start",      .method = HTTP_POST,   .handler = api_ota_start_handler },
         { .uri = "/api/ota/cancel",     .method = HTTP_POST,   .handler = api_ota_cancel_handler },

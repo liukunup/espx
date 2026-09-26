@@ -1,8 +1,9 @@
 /* Wi-Fi Provisioning Configuration
-
-   This file contains all configurable parameters for Wi-Fi provisioning.
-   Customize these macros to match your application requirements.
-*/
+ *
+ * Every value here is derived from Kconfig: run `idf.py menuconfig`
+ * (ESPX Configuration -> Wi-Fi provisioning) instead of editing this file.
+ * Keeping a single source of truth avoids the two drifting apart.
+ */
 
 #ifndef WIFI_PROV_CONFIG_H
 #define WIFI_PROV_CONFIG_H
@@ -10,109 +11,87 @@
 #include <sdkconfig.h>
 
 /* ============================================
- * Transport Configuration
+ * Transport
  * ============================================ */
+#define WIFI_PROV_TRANSPORT_SOFTAP 0
+#define WIFI_PROV_TRANSPORT_BLE    1
 
-/**
- * @brief Provisioning transport method
- * Options:
- *   - WIFI_PROV_TRANSPORT_BLE    : Use Bluetooth LE for provisioning
- *   - WIFI_PROV_TRANSPORT_SOFTAP : Use SoftAP (Wi-Fi Access Point) for provisioning
- */
+#if defined(CONFIG_ESPX_PROV_TRANSPORT_BLE)
+#define WIFI_PROV_TRANSPORT WIFI_PROV_TRANSPORT_BLE
+#elif defined(CONFIG_ESPX_PROV_TRANSPORT_SOFTAP)
 #define WIFI_PROV_TRANSPORT WIFI_PROV_TRANSPORT_SOFTAP
+#else
+#error "No provisioning transport selected (ESPX Configuration -> Provisioning transport)"
+#endif
 
 /* ============================================
- * Security Configuration
+ * Security
  * ============================================ */
-
-/**
- * @brief Security version for provisioning
- * Options:
- *   - 0 : No security (plain text communication)
- *   - 1 : Proof of Possession (PoP) based security with X25519 key exchange
- *   - 2 : SRP6a based authentication + AES-GCM encryption
- */
+#if defined(CONFIG_ESPX_PROV_SECURITY_VERSION_0)
+#define WIFI_PROV_SECURITY_VERSION 0
+#elif defined(CONFIG_ESPX_PROV_SECURITY_VERSION_2)
 #define WIFI_PROV_SECURITY_VERSION 2
+#else
+#define WIFI_PROV_SECURITY_VERSION 1
+#endif
 
-/**
- * @brief Proof of Possession (PoP) string for Security 1
- * Only used when WIFI_PROV_SECURITY_VERSION == 1
- */
-#define WIFI_PROV_POP "abcd1234"
+#define WIFI_PROV_POP             CONFIG_ESPX_PROV_POP
+#define WIFI_PROV_SEC2_USERNAME   CONFIG_ESPX_PROV_SEC2_USERNAME
+#define WIFI_PROV_SEC2_PASSWORD   CONFIG_ESPX_PROV_SEC2_PASSWORD
 
-/**
- * @brief Username for Security 2 (SRP6a)
- * Only used when WIFI_PROV_SECURITY_VERSION == 2
- */
-#define WIFI_PROV_SEC2_USERNAME "wifiprov"
-
-/**
- * @brief Password for Security 2 (SRP6a)
- * Only used when WIFI_PROV_SECURITY_VERSION == 2 and dev mode
- */
-#define WIFI_PROV_SEC2_PASSWORD "abcd1234"
-
-/**
- * @brief Enable development mode for Security 2
- * When enabled, uses hardcoded salt/verifier (for development only)
- * When disabled, must provide salt/verifier from device manufacturing partition
- */
+#ifdef CONFIG_ESPX_PROV_SEC2_DEV_MODE
 #define WIFI_PROV_SEC2_DEV_MODE 1
+#else
+#define WIFI_PROV_SEC2_DEV_MODE 0
+#endif
 
 /* ============================================
- * QR Code Configuration
+ * QR code
  * ============================================ */
-
-/**
- * @brief Enable QR code display on console
- * When enabled, displays QR code for easy provisioning
- */
+#ifdef CONFIG_ESPX_PROV_SHOW_QR
 #define WIFI_PROV_SHOW_QR 1
+#else
+#define WIFI_PROV_SHOW_QR 0
+#endif
+
+#ifdef CONFIG_ESPX_PROV_SHOW_POP_IN_QR
+#define WIFI_PROV_SHOW_POP_IN_QR 1
+#else
+#define WIFI_PROV_SHOW_POP_IN_QR 0
+#endif
 
 /* ============================================
- * Reprovisioning Configuration
+ * Re-provisioning and failure handling
  * ============================================ */
-
-/**
- * @brief Enable reprovisioning support
- * When enabled, allows device to be re-provisioned after initial setup
- */
+#ifdef CONFIG_ESPX_PROV_REPROVISIONING
+#define WIFI_PROV_REPROVISIONING 1
+#else
 #define WIFI_PROV_REPROVISIONING 0
+#endif
 
-/* ============================================
- * Failure Handling Configuration
- * ============================================ */
-
-/**
- * @brief Reset provisioning manager on failure
- * When enabled, resets state machine after max connection attempts
- */
+#ifdef CONFIG_ESPX_PROV_RESET_ON_FAILURE
+#define WIFI_PROV_RESET_ON_FAILURE 1
+#define WIFI_PROV_CONNECTION_COUNT CONFIG_ESPX_PROV_CONNECTION_COUNT
+#else
 #define WIFI_PROV_RESET_ON_FAILURE 0
-
-/**
- * @brief Number of Wi-Fi connection attempts before failure
- * Only used when WIFI_PROV_RESET_ON_FAILURE is enabled
- */
-#define WIFI_PROV_CONNECTION_COUNT 5
+#endif
 
 /* ============================================
- * SoftAP Configuration
+ * SoftAP
  * ============================================ */
-
-/**
- * @brief SoftAP SSID prefix
- * Final SSID will be: PREFIX + last 3 bytes of STA MAC
- */
+#ifdef CONFIG_ESPX_PROV_SOFTAP_PREFIX
+#define WIFI_PROV_SOFTAP_SSID_PREFIX CONFIG_ESPX_PROV_SOFTAP_PREFIX
+#else
 #define WIFI_PROV_SOFTAP_SSID_PREFIX "PROV_"
+#endif
 
 /* ============================================
- * Callback Configuration
+ * Application callback
  * ============================================ */
-
-/**
- * @brief Enable application callback for provisioning events
- * When enabled, wifi_prov_app_callback() will be called on events
- */
+#ifdef CONFIG_ESPX_PROV_ENABLE_APP_CALLBACK
+#define WIFI_PROV_ENABLE_APP_CALLBACK 1
+#else
 #define WIFI_PROV_ENABLE_APP_CALLBACK 0
+#endif
 
 #endif /* WIFI_PROV_CONFIG_H */

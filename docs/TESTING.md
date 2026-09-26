@@ -241,14 +241,25 @@ Then reboot and `mfg show` again — it must still be `no` (applied only once).
 
 ## P2 — network
 
-### T2.1 Wi-Fi provisioning
+### T2.1 Wi-Fi provisioning (BLE, default)
 
-**Proves:** the SoftAP provisioning path and credential storage.
+**Proves:** the BLE provisioning path and credential storage.
 
-1. Reboot the device; at the QR-code prompt, connect a phone/PC to the SoftAP
-   `PROV_XXXXXX` (password is the PoP, default `abcd1234`).
-2. Provision using the ESP SoftAP Prov app, or the QR payload:
-   `{"ver":"v1","name":"PROV_XXXXXX","username":"wifiprov","pop":"abcd1234","transport":"softap"}`
+1. Reboot the device. The log must show BLE advertising and **no** SoftAP:
+
+```
+I (…) BLE_INIT: Bluetooth MAC: 84:c7:bb:77:2e:76
+I (…) NimBLE: GAP procedure initiated: advertise;
+I (…) network_prov_mgr: Provisioning started with service name : ESPX_772E74
+I (…) QRCODE: {"ver":"v1","name":"ESPX_772E74","username":"","pop":"abcd1234","transport":"ble"}
+```
+
+   There must be **no** `mode : sta (…) + softAP (…)` and no
+   `DHCP server started on interface WIFI_AP_DEF`.
+
+2. Provision with the **ESP BLE Prov** app: scan for `ESPX_772E74`, enter the PoP
+   (`abcd1234`), then the Wi-Fi SSID and password. (Or scan the printed QR code
+   with the ESP SoftAP/BLE Prov app.)
 3. **Expect** the serial log:
 
 ```
@@ -261,7 +272,40 @@ I (…) app_main: Wi-Fi connected
 4. Reboot: it must reconnect **without** re-provisioning (`Already provisioned,
    starting Wi-Fi STA`).
 
-**Fail if:** no IP, or provisioning restarts on every boot.
+**Fail if:** no IP, provisioning restarts on every boot, or a SoftAP is created
+(that means the transport is still SoftAP).
+
+> **Bench note:** an unprovisioned BLE-only device has no IP, so the HTTPS and
+> MQTT cases below cannot run until Wi-Fi is joined. Either provision over BLE,
+> or set the credentials as factory data (see T2.1b), which is the scriptable
+> path.
+
+### T2.1b Pre-provisioned Wi-Fi (scriptable, no phone needed)
+
+**Proves:** a factory-programmed unit joins the plant network unattended, and it
+gives the test harness a device with an IP.
+
+Enter test mode (T1.1) and set the credentials, then reboot into the app:
+
+```
+cfg network:
+  wifi_ssid: <your-ssid>
+  wifi_password: <your-password>
+  mqtt_broker: mqtt://<your-host-ip>:1883
+  mqtt_topic_prefix: plant/line1
+exit
+```
+
+**Expect**
+
+```
+I (…) wifi_prov: Using pre-provisioned Wi-Fi credentials for SSID '<your-ssid>'
+I (…) wifi_prov: Got IP: 192.168.x.y
+I (…) app_main: Wi-Fi connected
+I (…) mqtt_client: MQTT connected
+```
+
+and **no** provisioning service start.
 
 ---
 
@@ -554,11 +598,16 @@ curl -k -s -X POST https://$IP/api/system/testmode
 Everything that does not need a network, in one command:
 
 ```bash
+# offline: boot, test mode, device registry, hardware self-test
 python3 tools/espx_test.py --port $ESPX_PORT all
+
+# host unit tests for the YAML parser
+tests/run_yaml_tests.sh
+
+# network: HTTPS API, YAML configuration, MQTT, delta OTA
+#   requires the device to have an IP (T2.1b) and to reach this host
+python3 tools/network_tests.py --device-ip <device-ip> --local-ip <host-ip> \
+                               --patch dist/<base>-to-<new>.patch
 ```
 
-Expected tail:
-
-```
-RESULT: PASS
-```
+Expected tail for each: `RESULT: PASS` / `ALL YAML TESTS PASSED`.

@@ -11,6 +11,8 @@ set(espx_sources
     "core/event_bus.c"
     "core/node_config.c"
     "core/device_manager.c"
+    "core/yaml.c"
+    "core/config_apply.c"
 
     # Peripheral drivers
     "peripherals/peripherals.c"

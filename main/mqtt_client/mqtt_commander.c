@@ -26,6 +26,8 @@
 #include "node_config.h"
 #include "ota_service/ota_service.h"
 #include "test_mode/test_mode.h"
+#include "config_apply.h"
+#include "yaml.h"
 
 static const char *TAG = "mqtt_commander";
 
@@ -209,12 +211,98 @@ static void handle_ota(cJSON *data)
 }
 
 /**
+ * @brief Publish a JSON object to a subtopic
+ */
+static void publish_json(const char *subtopic, cJSON *obj)
+{
+    if (obj == NULL) return;
+    char *s = cJSON_PrintUnformatted(obj);
+    if (s) {
+        mqtt_client_publish(subtopic, s, strlen(s), 1, false);
+        free(s);
+    }
+}
+
+/**
+ * @brief Apply a configuration document pushed over MQTT
+ *
+ * Accepted on {prefix}/cmd/config. The payload may be YAML or JSON.
+ *
+ * YAML:
+ *   node:
+ *     name: Line-1
+ *   network:
+ *     mqtt_broker: mqtt://host:1883
+ *   devices:
+ *     - id: relay_a
+ *       type: relay
+ *       config: {gpio: 5, active_level: 1}
+ *   remove_devices: [old1]
+ *   replace_devices: false
+ *
+ * The result is published to {prefix}/config/result.
+ */
+static void handle_config_push(const char *payload)
+{
+    config_apply_result_t res;
+    char err[128] = {0};
+
+    esp_err_t err_code = config_apply_payload(payload, &res, err, sizeof(err));
+
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddBoolToObject(out, "ok", err_code == ESP_OK && res.devices_failed == 0);
+
+    cJSON *counts = cJSON_AddObjectToObject(out, "applied");
+    cJSON_AddNumberToObject(counts, "added", res.devices_added);
+    cJSON_AddNumberToObject(counts, "updated", res.devices_updated);
+    cJSON_AddNumberToObject(counts, "removed", res.devices_removed);
+    cJSON_AddNumberToObject(counts, "failed", res.devices_failed);
+
+    cJSON_AddBoolToObject(out, "node_changed", res.node_changed);
+    cJSON_AddBoolToObject(out, "network_changed", res.network_changed);
+    cJSON_AddBoolToObject(out, "reboot_required", res.reboot_recommended);
+
+    const char *msg = res.error[0] ? res.error : err;
+    if (msg[0]) {
+        cJSON_AddStringToObject(out, "error", msg);
+    }
+
+    publish_json("config/result", out);
+    cJSON_Delete(out);
+}
+
+/**
  * @brief Handle config command
  */
 static void handle_config(cJSON *data)
 {
     cJSON *action = cJSON_GetObjectItem(data, "action");
+
+    /* A configuration document has no "action" key: it is a YAML/JSON push.
+     * A payload WITH "action" keeps the legacy introspection verbs. */
     if (!cJSON_IsString(action)) {
+        return;
+    }
+
+    if (strcmp(action->valuestring, "apply") == 0) {
+        cJSON *doc = cJSON_GetObjectItem(data, "config");
+        if (doc == NULL) {
+            const char *e = "{\"ok\":false,\"error\":\"missing 'config'\"}";
+            mqtt_client_publish("config/result", e, strlen(e), 1, false);
+            return;
+        }
+        char *text = cJSON_PrintUnformatted(doc);
+        if (text) {
+            handle_config_push(text);
+            free(text);
+        }
+        return;
+    }
+
+    if (strcmp(action->valuestring, "get_config") == 0) {
+        cJSON *cfg = config_export();
+        publish_json("attrs/config", cfg);
+        cJSON_Delete(cfg);
         return;
     }
 
@@ -312,7 +400,13 @@ void mqtt_commander_handle(const char *topic, const char *payload, int payload_l
             handle_control(target, data);
         }
     } else if (topic_matches_cmd(topic, "config")) {
-        handle_config(data);
+        /* A YAML (or JSON) configuration document has no "action" member and is
+         * applied directly; a payload with "action" uses the legacy verbs. */
+        if (yaml_looks_like_yaml(payload)) {
+            handle_config_push(payload);
+        } else {
+            handle_config(data);
+        }
     } else if (topic_matches_cmd(topic, "ota")) {
         handle_ota(data);
     } else if (topic_matches_cmd(topic, "reboot")) {

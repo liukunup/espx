@@ -92,17 +92,29 @@ static void notify_app(wifi_prov_event_t event, void *event_data)
     }
 }
 
+/**
+ * @brief Provisioning service name
+ *
+ * SoftAP: the SSID of the raised access point (prefix + last 3 MAC bytes).
+ * BLE   : the advertised device name.
+ */
 static void get_device_service_name(char *service_name, size_t max)
 {
     uint8_t mac[6];
     esp_wifi_get_mac(WIFI_IF_STA, mac);
+#if WIFI_PROV_TRANSPORT == WIFI_PROV_TRANSPORT_SOFTAP
     snprintf(service_name, max, "%s%02X%02X%02X",
              WIFI_PROV_SOFTAP_SSID_PREFIX, mac[3], mac[4], mac[5]);
+#else
+    snprintf(service_name, max, "%s%02X%02X%02X",
+             "ESPX_", mac[3], mac[4], mac[5]);
+#endif
 }
 
+#if WIFI_PROV_SECURITY_VERSION == 2
 static esp_err_t get_sec2_salt(const char **salt, uint16_t *salt_len)
 {
-#if WIFI_PROV_SECURITY_VERSION == 2 && WIFI_PROV_SEC2_DEV_MODE
+#if WIFI_PROV_SEC2_DEV_MODE
     *salt = sec2_salt;
     *salt_len = sizeof(sec2_salt);
     return ESP_OK;
@@ -113,7 +125,7 @@ static esp_err_t get_sec2_salt(const char **salt, uint16_t *salt_len)
 
 static esp_err_t get_sec2_verifier(const char **verifier, uint16_t *verifier_len)
 {
-#if WIFI_PROV_SECURITY_VERSION == 2 && WIFI_PROV_SEC2_DEV_MODE
+#if WIFI_PROV_SEC2_DEV_MODE
     *verifier = sec2_verifier;
     *verifier_len = sizeof(sec2_verifier);
     return ESP_OK;
@@ -121,6 +133,7 @@ static esp_err_t get_sec2_verifier(const char **verifier, uint16_t *verifier_len
     return ESP_FAIL;
 #endif
 }
+#endif /* WIFI_PROV_SECURITY_VERSION == 2 */
 
 /* ============================================
  * Event handler
@@ -203,11 +216,19 @@ static void wifi_prov_print_qr(const char *name, const char *username,
         return;
     }
 
+    /* The PoP is only embedded when explicitly enabled: a printed QR code
+     * containing the shared secret defeats the point of the secret. */
+#if WIFI_PROV_SHOW_POP_IN_QR
+    const char *qr_pop = pop;
+#else
+    const char *qr_pop = NULL;
+#endif
+
     char payload[200] = {0};
-    if (pop) {
+    if (qr_pop) {
         snprintf(payload, sizeof(payload),
                  "{\"ver\":\"%s\",\"name\":\"%s\",\"username\":\"%s\",\"pop\":\"%s\",\"transport\":\"%s\"}",
-                 PROV_QR_VERSION, name, username ? username : "", pop, transport);
+                 PROV_QR_VERSION, name, username ? username : "", qr_pop, transport);
     } else {
         snprintf(payload, sizeof(payload),
                  "{\"ver\":\"%s\",\"name\":\"%s\",\"transport\":\"%s\",\"network\":\"wifi\"}",
@@ -332,6 +353,8 @@ esp_err_t wifi_prov_init(void)
     /* Wi-Fi netifs */
     esp_netif_create_default_wifi_sta();
 #if WIFI_PROV_TRANSPORT == WIFI_PROV_TRANSPORT_SOFTAP
+    /* Only the SoftAP transport needs an AP netif. The BLE transport creates no
+     * access point at all, so the device has no IP until it joins Wi-Fi. */
     esp_netif_create_default_wifi_ap();
 #endif
 

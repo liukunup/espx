@@ -309,6 +309,25 @@ tools/gen_certs.sh [CN] [DAYS]      # default CN=espx.local, 3650 days
 
 ---
 
+## 6.1 Wi-Fi provisioning
+
+Default transport is **BLE** (`CONFIG_ESPX_PROV_TRANSPORT_BLE`):
+
+* No access point is created, so the device exposes no open network and has no
+  IP until it joins the configured Wi-Fi.
+* Service name is `ESPX_<last 3 MAC bytes>`; security is X25519 + PoP
+  (`CONFIG_ESPX_PROV_POP`).
+* The console prints a QR payload:
+  `{"ver":"v1","name":"ESPX_772E74","username":"","pop":"abcd1234","transport":"ble"}`
+
+SoftAP transport remains selectable (`CONFIG_ESPX_PROV_TRANSPORT_SOFTAP`) for
+situations with no BLE-capable client.
+
+**Consequence for bring-up:** an unprovisioned BLE-only device is unreachable
+over the network — neither the HTTPS API nor MQTT is available until it joins
+Wi-Fi. For bench testing without a phone app, either provision over BLE or use
+the pre-provisioned path in §7.1.
+
 ## 7. Factory provisioning
 
 Factory data is a JSON document written to the dedicated `mfg_data` NVS
@@ -430,7 +449,8 @@ running afterwards. See limitation #1 about the missing authentication.
 | 6 | `shiftreg_595` uses bare GPIO toggling | no explicit setup/hold delays; verified working on this board, but long wires/many chips may need SPI or added delays | use SPI if you cascade beyond 4 chips |
 | 7 | Only one I²C/SPI bus abstraction | new buses need a driver | — |
 | 8 | Test console assumes the auto-reset USB-serial wiring | `tools/espx_test.py` drives DTR/RTS | use a manual reset if your adapter differs |
-| 9 | The config UI is reachable over the open provisioning SoftAP | anyone in radio range can reconfigure the device during provisioning | provision at a controlled location, or set `wifi_ssid` via factory data so the SoftAP never starts |
+| 9 | With the **SoftAP** transport the config UI is reachable over the open provisioning AP | anyone in radio range can reconfigure the device during provisioning | default is BLE (no AP); set `wifi_ssid` via factory data so no provisioning AP is ever raised |
+| 10 | The BLE PoP is compiled in and defaults to `abcd1234` | the shared secret is the same on every unit | set `CONFIG_ESPX_PROV_POP` per production batch, and `CONFIG_ESPX_PROV_SHOW_POP_IN_QR=n` so printed QR codes omit it |
 
 ---
 

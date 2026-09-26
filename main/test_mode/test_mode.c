@@ -25,6 +25,7 @@
 #include "event_bus.h"
 #include "peripherals.h"
 #include "mfg_provision.h"
+#include "config_apply.h"
 
 static const char *TAG = "test_mode";
 
@@ -207,6 +208,8 @@ static void print_help(void)
     printf("  mfg set <json>           Write factory data\n");
     printf("  mfg apply                Apply factory data now\n");
     printf("  mfg clear                Erase factory data\n");
+    printf("  cfg <json|yaml>          Apply a configuration document\n");
+    printf("  cfg show                 Print the current configuration\n");
     printf("  exit                     Reboot\n");
     printf("\n");
 }
@@ -592,6 +595,43 @@ static bool console_read_line(char *line, size_t max)
     return false;
 }
 
+static void cmd_cfg(char *args)
+{
+    if (args == NULL || args[0] == '\0') {
+        printf("Usage: cfg <json|yaml>   |   cfg show\n");
+        return;
+    }
+
+    if (strcmp(args, "show") == 0) {
+        config_apply_result_t res;
+        (void)res;
+        cJSON *cfg = node_config_get();
+        char *s = cfg ? cJSON_Print(cfg) : NULL;
+        printf("%s\n", s ? s : "<none>");
+        free(s);
+        if (cfg) cJSON_Delete(cfg);
+
+        printf("devices:\n");
+        for (size_t i = 0; i < device_get_count(); i++) {
+            const device_t *d = device_get_by_index(i);
+            if (d) printf("  %-16s %-16s %s\n", d->id, d->type->name,
+                          d->initialized ? "ok" : "not init");
+        }
+        return;
+    }
+
+    config_apply_result_t res;
+    char err[128] = {0};
+    esp_err_t rc = config_apply_payload(args, &res, err, sizeof(err));
+
+    printf("apply: %s  (+%d ~%d -%d failed %d)%s%s%s\n",
+           rc == ESP_OK ? "OK" : esp_err_to_name(rc),
+           res.devices_added, res.devices_updated, res.devices_removed, res.devices_failed,
+           res.reboot_recommended ? "  reboot required" : "",
+           (res.error[0] ? "  error: " : ""), res.error);
+    if (rc != ESP_OK && err[0]) printf("  %s\n", err);
+}
+
 /* ============================================
  * Entry point
  * ============================================ */
@@ -671,6 +711,8 @@ void test_mode_enter(void)
             cmd_reset();
         } else if (strcmp(cmd, "mfg") == 0) {
             cmd_mfg(rest ? rest : empty);
+        } else if (strcmp(cmd, "cfg") == 0) {
+            cmd_cfg(rest ? rest : empty);
         } else if (strcmp(cmd, "exit") == 0) {
             printf("Rebooting...\n");
             vTaskDelay(pdMS_TO_TICKS(200));

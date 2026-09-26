@@ -50,139 +50,147 @@ menu "ESPX Configuration"
         help
             Number of LEDs in the strip
 
-    config WIFI_DEFAULT_SSID
-        string "Default Wi-Fi SSID"
-        default ""
-        depends on ESPX
-
-    config WIFI_DEFAULT_PASSWORD
-        string "Default Wi-Fi Password"
-        default ""
-        depends on ESPX
-
     config MQTT_BROKER_URL
         string "Default MQTT Broker URL"
         default "mqtt://localhost:1883"
         depends on ESPX
+        help
+            Used only when no broker has been configured through the Web UI,
+            MQTT or factory data.
 
     config OTA_SERVER_URL
         string "Default OTA Server URL"
         default ""
         depends on ESPX
 
-endmenu
+    # =====================================================================
+    # Wi-Fi provisioning
+    # =====================================================================
 
-menu "Example Configuration"
-
-    choice EXAMPLE_PROV_TRANSPORT
-        bool "Provisioning Transport"
-        default EXAMPLE_PROV_TRANSPORT_SOFTAP if IDF_TARGET_ESP32S2
-        default EXAMPLE_PROV_TRANSPORT_BLE
+    choice ESPX_PROV_TRANSPORT
+        bool "Provisioning transport"
+        default ESPX_PROV_TRANSPORT_BLE
         help
-            Wi-Fi provisioning component offers both, SoftAP and BLE transports. Choose any one.
+            How an unprovisioned device receives Wi-Fi credentials.
 
-        config EXAMPLE_PROV_TRANSPORT_BLE
+            BLE  - phone app / Bluetooth. Default. No access point is created,
+                   so the device exposes no open network and has no IP until it
+                   joins the configured Wi-Fi.
+            SoftAP - the device raises its own access point and is configured
+                   over HTTP. Useful when no BLE-capable client is available.
+                   Note: during provisioning the config UI is reachable by
+                   anyone in radio range (see docs/ARCHITECTURE.md limitation 9).
+
+            Either way, a device carrying pre-provisioned credentials
+            (network.wifi_ssid in factory data) joins that network directly and
+            never starts the provisioning service.
+
+        config ESPX_PROV_TRANSPORT_BLE
             bool "BLE"
             select BT_ENABLED
             depends on !IDF_TARGET_ESP32S2
-        config EXAMPLE_PROV_TRANSPORT_SOFTAP
-            bool "Soft AP"
+
+        config ESPX_PROV_TRANSPORT_SOFTAP
+            bool "SoftAP"
             select LWIP_IPV4
     endchoice
 
-    choice EXAMPLE_PROV_SECURITY_VERSION
-        bool "Protocomm security version"
-        default EXAMPLE_PROV_SECURITY_VERSION_2
-        help
-            Wi-Fi provisioning component offers 3 security versions.
-            The example offers a choice between security version 1 and 2.
+    config ESPX_PROV_TRANSPORT
+        int
+        default 1 if ESPX_PROV_TRANSPORT_BLE
+        default 2 if ESPX_PROV_TRANSPORT_SOFTAP
 
-        config EXAMPLE_PROV_SECURITY_VERSION_1
-            bool "Security version 1"
+    choice ESPX_PROV_SECURITY_VERSION
+        bool "Provisioning security version"
+        default ESPX_PROV_SECURITY_VERSION_1
+        help
+            Protocomm security for the provisioning session.
+            Security 1 (X25519 + proof-of-possession) is what the Espressif
+            provisioning apps use by default and needs only a PoP string.
+            Security 2 (SRP6a) needs a per-device salt/verifier.
+
+        config ESPX_PROV_SECURITY_VERSION_0
+            bool "Security 0 (no security, plain text)"
+            select ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0
+
+        config ESPX_PROV_SECURITY_VERSION_1
+            bool "Security 1 (X25519 + PoP)"
             select ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1
 
-        config EXAMPLE_PROV_SECURITY_VERSION_2
-            bool "Security version 2"
+        config ESPX_PROV_SECURITY_VERSION_2
+            bool "Security 2 (SRP6a)"
             select ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2
     endchoice
 
-    choice EXAMPLE_PROV_MODE
-        bool "Security version 2 mode"
-        depends on EXAMPLE_PROV_SECURITY_VERSION_2
-        default EXAMPLE_PROV_SEC2_DEV_MODE
-
-        config EXAMPLE_PROV_SEC2_DEV_MODE
-            bool "Security version 2 development mode"
-            depends on EXAMPLE_PROV_SECURITY_VERSION_2
-            help
-                This enables the development mode for
-                security version 2.
-                Please note that this mode is NOT recommended for production purpose.
-
-        config EXAMPLE_PROV_SEC2_PROD_MODE
-            bool "Security version 2 production mode"
-            depends on EXAMPLE_PROV_SECURITY_VERSION_2
-            help
-                This enables the production mode for
-                security version 2.
-    endchoice
-
-    config EXAMPLE_PROV_TRANSPORT
-        int
-        default 1 if EXAMPLE_PROV_TRANSPORT_BLE
-        default 2 if EXAMPLE_PROV_TRANSPORT_SOFTAP
-
-    config EXAMPLE_PROV_ENABLE_APP_CALLBACK
-        bool "Enable provisioning manager app callback"
-        default n
+    config ESPX_PROV_POP
+        string "Proof of possession (Security 1)"
+        default "abcd1234"
+        depends on ESPX_PROV_SECURITY_VERSION_1
         help
-            This is for advanced use-cases like modifying Wi-Fi configuration parameters. This
-            executes a blocking app callback when any provisioning event is triggered.
+            Shared secret the provisioning client must present.
+            MUST be changed for production.
 
-    config EXAMPLE_RESET_PROVISIONED
-        bool
-        default n
-        prompt "Reset provisioned status of the device"
-        help
-            This erases the NVS to reset provisioned status of the device on every reboot.
-            Provisioned status is determined by the Wi-Fi STA configuration, saved on the NVS.
+    config ESPX_PROV_SEC2_USERNAME
+        string "SRP6a username (Security 2)"
+        default "wifiprov"
+        depends on ESPX_PROV_SECURITY_VERSION_2
 
-    config EXAMPLE_RESET_PROV_MGR_ON_FAILURE
-        bool
+    config ESPX_PROV_SEC2_PASSWORD
+        string "SRP6a password (Security 2, development mode)"
+        default "abcd1234"
+        depends on ESPX_PROV_SECURITY_VERSION_2
+
+    config ESPX_PROV_SEC2_DEV_MODE
+        bool "Security 2 development mode (hard-coded salt/verifier)"
         default y
-        prompt "Reset provisioned credentials and state machine after session failure"
+        depends on ESPX_PROV_SECURITY_VERSION_2
         help
-            Enable resetting provisioned credentials and state machine after session failure.
-            This will restart the provisioning service after retries are exhausted.
+            Uses a salt/verifier compiled into the firmware.
+            NOT suitable for production: every device would share the same
+            credentials. Disable and supply per-device values from the
+            manufacturing partition for production builds.
 
-    config EXAMPLE_PROV_MGR_CONNECTION_CNT
-        int
+    config ESPX_PROV_SOFTAP_PREFIX
+        string "SoftAP SSID prefix"
+        default "PROV_"
+        depends on ESPX_PROV_TRANSPORT_SOFTAP
+        help
+            Final SSID is the prefix followed by the last three bytes of the
+            station MAC.
+
+    config ESPX_PROV_SHOW_QR
+        bool "Print a provisioning QR code on the console"
+        default y
+
+    config ESPX_PROV_SHOW_POP_IN_QR
+        bool "Include the PoP in the QR code"
+        default y
+        depends on ESPX_PROV_SECURITY_VERSION_1 && ESPX_PROV_SHOW_QR
+        help
+            Convenient during development. Disable for production: the QR code
+            is then printed without the shared secret.
+
+    config ESPX_PROV_ENABLE_APP_CALLBACK
+        bool "Enable the application provisioning callback"
+        default n
+        help
+            Runs a blocking callback for provisioning events, for advanced
+            use-cases such as adjusting the station configuration.
+
+    config ESPX_PROV_RESET_ON_FAILURE
+        bool "Reset the provisioning state machine after repeated failures"
+        default y
+
+    config ESPX_PROV_CONNECTION_COUNT
+        int "Station connection attempts before reset"
         default 5
-        prompt "Max connection attempts before resetting provisioning state machine"
-        depends on EXAMPLE_RESET_PROV_MGR_ON_FAILURE
+        depends on ESPX_PROV_RESET_ON_FAILURE
         help
-            Set the total number of connection attempts to avoid reconnecting to an inexistent AP or if credentials
-            are misconfigured. Provisioned credentials are erased and internal state machine
-            is reset after this threshold is reached.
+            Guards against endlessly retrying an unreachable AP or wrong
+            credentials.
 
-    config EXAMPLE_PROV_SHOW_QR
-        bool "Show provisioning QR code"
-        default y
-        help
-            Show the QR code for provisioning.
-
-    config EXAMPLE_PROV_USING_BLUEDROID
-        bool
-        depends on (BT_BLUEDROID_ENABLED && (IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32S3))
-        select BT_BLE_42_FEATURES_SUPPORTED
-        default y
-        help
-            This enables BLE 4.2 features for Bluedroid.
-
-    config EXAMPLE_REPROVISIONING
-        bool "Re-provisioning"
-        help
-            Enable re-provisioning - allow the device to provision for new credentials
-            after previous successful provisioning.
+    config ESPX_PROV_REPROVISIONING
+        bool "Allow re-provisioning after a successful setup"
+        default n
 
 endmenu

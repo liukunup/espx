@@ -51,7 +51,9 @@ static void load_network_config(void)
     snprintf(g_broker, sizeof(g_broker), "mqtt://test.mosquitto.org:1883");
     g_username[0] = '\0';
     g_password[0] = '\0';
-    snprintf(g_topic_prefix, sizeof(g_topic_prefix), "espx/%s", g_device_id);
+    /* Default prefix is the device id itself: it already carries the product
+     * prefix ("espx-<mac>"), so "espx/<device_id>" would duplicate it. */
+    snprintf(g_topic_prefix, sizeof(g_topic_prefix), "%s", g_device_id);
 
     cJSON *cfg = node_config_get();
     if (cfg == NULL) return;
