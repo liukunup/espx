@@ -119,12 +119,27 @@ esp_err_t cert_manager_get_info(char *info, size_t max_len)
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Build lowercase device string (max 64 chars including null)
+    char device_lower[64] = {0};
+    size_t j = 0;
+    for (size_t i = 0; g_device_san[i] && i < sizeof(g_device_san) && j < sizeof(device_lower) - 1; i++) {
+        char c = g_device_san[i];
+        if (c >= 'A' && c <= 'Z') {
+            device_lower[j++] = c + 32;
+        } else if (c) {
+            device_lower[j++] = c;
+        }
+    }
+    device_lower[j] = '\0';
+
     snprintf(info, max_len,
-             "{\"valid\":%s,\"device\":\"%s\",\"algorithm\":\"RSA-2048\","
-             "\"source\":\"build-time PEM files\","
-             "\"cert_bytes\":%u,\"key_bytes\":%u}",
-             g_initialized ? "true" : "false", g_device_san,
-             (unsigned)g_cert_len, (unsigned)g_key_len);
+             "{\"valid\":%s,\"device\":\"%s\",\"algorithm\":\"%s\",\"source\":\"%s\",\"cert_bytes\":%u,\"key_bytes\":%u}",
+             g_initialized ? "true" : "false",
+             device_lower,
+             "ECDSA P-256",
+             "build-time PEM files",
+             (unsigned)g_cert_len,
+             (unsigned)g_key_len);
 
     return ESP_OK;
 }

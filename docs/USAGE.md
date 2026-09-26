@@ -9,6 +9,10 @@ HTTPS 用自签名证书，`curl` 需加 `-k`。
 HOST=espx-84c7bb772e74.local
 BROKER=192.168.1.10
 PREFIX=plant/line1
+
+# 重新生成证书（根据设备 ID）
+python3 tools/gen_cert.py --id espx-84c7bb772e74
+idf.py build   # 重新编译固件以嵌入新证书
 ```
 
 ---

@@ -83,7 +83,14 @@ static cJSON *build_state(void)
     /* Identity and environment travel with every snapshot, so a client needs
      * nothing but the state stream to render the page. The one-off "hello"
      * frame is a convenience, not a dependency. */
-    cJSON_AddStringToObject(root, "id", node_config_get_device_id());
+    /* Identity and environment travel with every snapshot, so a client needs
+     * nothing but the state stream to render the page. The one-off "hello"
+     * frame is a convenience, not a dependency. */
+    const char *id = node_config_get_device_id();
+    if (strncmp(id, "espx-", 5) == 0) {
+        id += 5;
+    }
+    cJSON_AddStringToObject(root, "id", id);
     cJSON_AddStringToObject(root, "name", node_config_get_name());
     cJSON_AddStringToObject(root, "version", app_version());
     if (mdns_service_is_running()) {
@@ -327,7 +334,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
          * opened UI is populated without waiting for the timer. */
         cJSON *hello = cJSON_CreateObject();
         cJSON_AddStringToObject(hello, "type", "hello");
-        cJSON_AddStringToObject(hello, "id", node_config_get_device_id());
+        {
+            const char *id = node_config_get_device_id();
+            if (strncmp(id, "espx-", 5) == 0) {
+                id += 5;
+            }
+            cJSON_AddStringToObject(hello, "id", id);
+        }
         cJSON_AddStringToObject(hello, "name", node_config_get_name());
         cJSON_AddStringToObject(hello, "version", app_version());
         char iso[32];

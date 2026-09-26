@@ -188,6 +188,8 @@ esp_err_t device_manager_load(void)
     }
 
     cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "Loaded %u peripheral(s) from NVS", (unsigned)g_device_count);
     return ESP_OK;
 }
 
@@ -234,6 +236,11 @@ esp_err_t device_manager_save(void)
     nvs_close(nvs);
     free(json_str);
 
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Saved %u peripheral(s) to NVS", (unsigned)g_device_count);
+    } else {
+        ESP_LOGE(TAG, "Failed to save peripherals to NVS: %s", esp_err_to_name(err));
+    }
     return err;
 }
 

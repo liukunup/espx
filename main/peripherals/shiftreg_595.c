@@ -3,11 +3,11 @@
  * @brief 74HC595 shift register driver
  *
  * Config:
- *   data_gpio:   Serial data input (DS, pin 14)
- *   clock_gpio:  Shift clock (SHCP, pin 11)
- *   latch_gpio:  Storage clock (STCP, pin 12)
- *   oe_gpio:     Output enable (OE, pin 13), -1 to disable
- *   count:       Number of cascaded 595 chips (default 1)
+ *   DS:     Serial data input (DS, pin 14)
+ *   SCK:    Shift clock (SHCP, pin 11)
+ *   RCK:    Storage clock (STCP, pin 12)
+ *   OE:     Output enable (OE, pin 13), -1 to disable
+ *   count:  Number of cascaded 595 chips (default 1)
  *
  * Write value: array of bytes (one per chip, big-endian: index 0 = last chip)
  */
@@ -61,14 +61,14 @@ static esp_err_t shiftreg_init(device_t *dev, const cJSON *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    cJSON *data_gpio = cJSON_GetObjectItem(config, "data_gpio");
-    cJSON *clock_gpio = cJSON_GetObjectItem(config, "clock_gpio");
-    cJSON *latch_gpio = cJSON_GetObjectItem(config, "latch_gpio");
-    cJSON *oe_gpio = cJSON_GetObjectItem(config, "oe_gpio");
+    cJSON *din = cJSON_GetObjectItem(config, "DS");
+    cJSON *sck = cJSON_GetObjectItem(config, "SCK");
+    cJSON *rck = cJSON_GetObjectItem(config, "RCK");
+    cJSON *oe = cJSON_GetObjectItem(config, "OE");
     cJSON *count = cJSON_GetObjectItem(config, "count");
 
-    if (!cJSON_IsNumber(data_gpio) || !cJSON_IsNumber(clock_gpio) ||
-        !cJSON_IsNumber(latch_gpio)) {
+    if (!cJSON_IsNumber(din) || !cJSON_IsNumber(sck) ||
+        !cJSON_IsNumber(rck)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -77,10 +77,10 @@ static esp_err_t shiftreg_init(device_t *dev, const cJSON *config)
         return ESP_ERR_NO_MEM;
     }
 
-    data->data_gpio = data_gpio->valueint;
-    data->clock_gpio = clock_gpio->valueint;
-    data->latch_gpio = latch_gpio->valueint;
-    data->oe_gpio = cJSON_IsNumber(oe_gpio) ? oe_gpio->valueint : -1;
+    data->data_gpio = din->valueint;
+    data->clock_gpio = sck->valueint;
+    data->latch_gpio = rck->valueint;
+    data->oe_gpio = cJSON_IsNumber(oe) ? oe->valueint : -1;
     data->count = cJSON_IsNumber(count) ? count->valueint : 1;
 
     if (data->count < 1) data->count = 1;
@@ -113,7 +113,7 @@ static esp_err_t shiftreg_init(device_t *dev, const cJSON *config)
     shiftreg_shift_out(data, data->state, data->count);
 
     dev->driver_data = data;
-    ESP_LOGI(TAG, "74HC595 initialized: count=%d, data=%d, clock=%d, latch=%d",
+    ESP_LOGI(TAG, "74HC595 initialized: count=%d, DS=%d, SCK=%d, RCK=%d",
              data->count, data->data_gpio, data->clock_gpio, data->latch_gpio);
 
     return ESP_OK;
@@ -199,7 +199,7 @@ static esp_err_t shiftreg_default_config(cJSON *config)
     /* Deliberately avoids GPIO17/18: those are UART1's IO_MUX pins and UART1 is
      * the AT command interface by default. A suggested default that collides
      * with a fixed peripheral is a trap. */
-    cJSON_AddNumberToObject(config, "data_gpio", 16);
+    cJSON_AddNumberToObject(config, "din", 16);
     cJSON_AddNumberToObject(config, "clock_gpio", 15);
     cJSON_AddNumberToObject(config, "latch_gpio", 7);
     cJSON_AddNumberToObject(config, "oe_gpio", -1);

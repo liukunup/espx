@@ -246,7 +246,8 @@ exit            # reboot and apply
 | `tools/make_delta_patch.py` | Build a delta OTA patch and self-verify it |
 | `tools/emqx_init.py` | EMQX authenticator/user/ACL setup with a real MQTT round-trip check |
 | `tools/mini_mqtt_broker.py` | Dependency-free MQTT broker for local testing |
-| `tools/gen_certs.sh` | Regenerate the HTTPS certificate |
+| `tools/gen_cert.py` | Generate HTTPS certificate from device ID |
+| `tools/gen_certs.sh` | Regenerate the HTTPS certificate (manual CN) |
 | `tools/verify_device.sh` | Flash / monitor / capture helpers |
 | `tests/run_yaml_tests.sh` | Host unit tests for the YAML parser |
 

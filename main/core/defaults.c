@@ -65,8 +65,11 @@ esp_err_t defaults_seed_once(void)
     }
 
     cJSON *cfg = cJSON_CreateObject();
-    cJSON_AddNumberToObject(cfg, "data_gpio", CONFIG_ESPX_DEFAULT_WS2812_GPIO);
+    cJSON_AddNumberToObject(cfg, "din", CONFIG_ESPX_DEFAULT_WS2812_GPIO);
     cJSON_AddNumberToObject(cfg, "count", CONFIG_ESPX_DEFAULT_WS2812_COUNT);
+    cJSON_AddNumberToObject(cfg, "r", 0);
+    cJSON_AddNumberToObject(cfg, "g", 0);
+    cJSON_AddNumberToObject(cfg, "b", 0);
     cJSON_AddNumberToObject(cfg, "brightness", 128);
 
     esp_err_t err = device_add(CONFIG_ESPX_DEFAULT_WS2812_ID, "ws2812", cfg);

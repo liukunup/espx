@@ -136,7 +136,12 @@ cJSON* node_config_get(void)
     if (g_config == NULL) {
         g_config = cJSON_CreateObject();
         cJSON *node = cJSON_AddObjectToObject(g_config, "node");
-        cJSON_AddStringToObject(node, "device_id", g_device_id);
+        // Strip "espx-" prefix for API responses
+        const char *id = g_device_id;
+        if (strncmp(id, "espx-", 5) == 0) {
+            id += 5;
+        }
+        cJSON_AddStringToObject(node, "device_id", id);
         cJSON_AddStringToObject(node, "name", g_name);
         cJSON_AddStringToObject(node, "fw_version", app_version());
     }

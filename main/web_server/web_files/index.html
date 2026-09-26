@@ -16,9 +16,12 @@ header{background:var(--p);color:#fff;padding:.85rem 1.5rem;display:flex;
   justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
 header h1{font-size:1.1rem;font-weight:600}
 header h1 small{opacity:.75;font-weight:400;font-size:.8rem;margin-left:.5rem}
-.status{font-size:.8rem;display:flex;gap:.6rem;align-items:center}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--err)}
-.dot.ok{background:#4ade80}
+.status{font-size:.8rem;display:flex;gap:.5rem;align-items:center;margin-left:auto}
+.sep{opacity:.4;margin:0 .1rem}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--err);flex-shrink:0}
+.dot.connected{background:#4ade80}
+.dot.connecting{background:#fbbf24}
+#hdr-ws{font-size:.75rem;opacity:.9}
 main{max-width:1100px;margin:1.5rem auto;padding:0 1rem}
 nav{display:flex;gap:.4rem;margin-bottom:1.25rem;flex-wrap:wrap}
 .tab{padding:.5rem 1.1rem;border:1px solid var(--border);background:var(--card);
@@ -33,6 +36,10 @@ nav{display:flex;gap:.4rem;margin-bottom:1.25rem;flex-wrap:wrap}
 .item{padding:.7rem .85rem;background:var(--bg);border-radius:.5rem}
 .lbl{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 .val{font-size:1rem;font-weight:600;word-break:break-all}
+.val.copyable{cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.val.copyable>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.copy-icon{flex-shrink:0;font-size:1rem;margin-left:.5rem;opacity:.4;transition:opacity .2s}
+.val.copyable:hover .copy-icon{opacity:.8}
 .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
   padding:.7rem 0;border-bottom:1px solid var(--border)}
 .row:last-child{border-bottom:none}
@@ -83,59 +90,63 @@ input[type="color"] { cursor:pointer }
 <header>
   <h1>ESPX Node</h1>
   <div class="status">
-    <span id="hdr-wifi" class="badge" title="Wi-Fi status"></span>
-    <span id="hdr-mdns" class="badge" title="mDNS"></span>
-    <span id="hdr-time" class="mono" title="NTP time" style="text-align:left;line-height:1.3"></span>
-    <span id="hdr-live" class="badge" title="WebSocket live updates">ws</span>
-    <span id="hdr-status">connecting…</span><div id="hdr-dot" class="dot"></div>
+    <span id="hdr-ssid" title="SSID"></span>
+    <span class="sep">|</span>
+    <span id="hdr-mdns" title="mDNS"></span>
+    <span class="sep">|</span>
+    <span id="hdr-datetime" class="mono" title="DateTime"></span>
+    <span class="sep">|</span>
+    <div id="hdr-dot" class="dot"></div>
+    <span id="hdr-ws">WebSocket</span>
   </div>
+  <button id="lang-btn" style="padding:.3rem .6rem;border:none;border-radius:.3rem;cursor:pointer;font-size:.75rem;font-weight:500;background:rgba(255,255,255,.2);color:#fff"></button>
 </header>
 
 <main>
 <nav>
-  <button class="tab active" data-tab="dash">Dashboard</button>
-  <button class="tab" data-tab="devices">Devices</button>
+  <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="peripherals">Peripherals</button>
   <button class="tab" data-tab="network">Network</button>
   <button class="tab" data-tab="mqtt">MQTT</button>
-  <button class="tab" data-tab="ota">Firmware</button>
+  <button class="tab" data-tab="ota">OTA</button>
   <button class="tab" data-tab="system">System</button>
 </nav>
 
 <!-- ================= Dashboard ================= -->
-<section id="tab-dash">
+<section id="tab-dashboard">
   <div class="card">
     <h2>Node</h2>
     <div class="grid">
-      <div class="item"><div class="lbl">Device ID</div><div class="val" id="n-id">-</div></div>
-      <div class="item"><div class="lbl">Name</div><div class="val" id="n-name">-</div></div>
-      <div class="item"><div class="lbl">Firmware</div><div class="val" id="n-ver">-</div></div>
-      <div class="item"><div class="lbl">Devices</div><div class="val" id="n-count">-</div></div>
+      <div class="item"><div class="lbl">ID</div><div class="val copyable" id="n-id" onclick="copyVal(this)">- <span class="copy-icon">📋</span></div></div>
+      <div class="item"><div class="lbl">Name</div><div class="val copyable" id="n-name" onclick="copyVal(this)">- <span class="copy-icon">📋</span></div></div>
+      <div class="item"><div class="lbl">Firmware</div><div class="val copyable" id="n-ver" onclick="copyVal(this)">- <span class="copy-icon">📋</span></div></div>
+      <div class="item"><div class="lbl">Peripherals</div><div class="val" id="n-count">-</div></div>
       <div class="item"><div class="lbl">Uptime</div><div class="val" id="n-up">-</div></div>
       <div class="item"><div class="lbl">Free heap</div><div class="val" id="n-heap">-</div></div>
-      <div class="item"><div class="lbl">WS clients</div><div class="val" id="n-ws">0</div></div>
+      <div class="item"><div class="lbl">WebSocket clients</div><div class="val" id="n-ws">0</div></div>
     </div>
   </div>
   <div class="card">
     <h2>System</h2>
     <div class="grid">
       <div class="item">
-        <div class="lbl">CPU load <span id="cpu-sub" class="meta"></span></div>
+        <div class="lbl">CPU <span id="cpu-sub" class="meta"></span></div>
         <div class="val" id="cpu-usage">-</div>
         <div class="bar"><div id="cpu-bar"></div></div>
       </div>
+      <div class="item"><div class="lbl">Tasks</div><div class="val" id="n-tasks">-</div></div>
       <div class="item">
         <div class="lbl">Internal RAM <span id="iram-sub" class="meta"></span></div>
         <div class="val" id="iram-used">-</div>
         <div class="bar"><div id="iram-bar"></div></div>
       </div>
+      <div class="item"><div class="lbl">Internal min-free</div><div class="val" id="iram-min">-</div></div>
+      <div class="item"><div class="lbl">Largest block</div><div class="val" id="iram-largest">-</div></div>
       <div class="item">
         <div class="lbl">PSRAM <span id="psram-sub" class="meta"></span></div>
         <div class="val" id="psram-used">-</div>
         <div class="bar"><div id="psram-bar"></div></div>
       </div>
-      <div class="item"><div class="lbl">Tasks</div><div class="val" id="n-tasks">-</div></div>
-      <div class="item"><div class="lbl">Internal low-water</div><div class="val" id="iram-min">-</div></div>
-      <div class="item"><div class="lbl">Largest free block (int)</div><div class="val" id="iram-largest">-</div></div>
     </div>
   </div>
   <div class="card">
@@ -144,10 +155,10 @@ input[type="color"] { cursor:pointer }
   </div>
 </section>
 
-<!-- ================= Devices ================= -->
-<section id="tab-devices" class="hide">
+<!-- ================= Peripherals ================= -->
+<section id="tab-peripherals" class="hide">
   <div class="card">
-    <h2>Bound devices <button class="btn-p" id="btn-add">+ Add device</button></h2>
+    <h2>Bound peripherals <button class="btn-p" id="btn-add">+ Add peripheral</button></h2>
     <div id="dev-list">Loading…</div>
   </div>
 </section>
@@ -155,7 +166,7 @@ input[type="color"] { cursor:pointer }
 <!-- ================= Network ================= -->
 <section id="tab-network" class="hide">
   <div class="card">
-    <h2>Wi-Fi <button class="btn-s" id="btn-scan">Scan</button></h2>
+    <h2>Wi-Fi <button class="btn-p" id="btn-scan">Scan</button></h2>
     <div class="grid">
       <div class="item"><div class="lbl">SSID</div><div class="val" id="w-ssid">-</div></div>
       <div class="item"><div class="lbl">IP</div><div class="val" id="w-ip">-</div></div>
@@ -165,15 +176,16 @@ input[type="color"] { cursor:pointer }
   <div class="card">
     <h2>Available networks <span id="scan-status" class="meta"></span></h2>
     <div id="scan-list" class="meta" style="margin-bottom:.5rem">Click "Scan" to search for Wi-Fi networks.</div>
+    <div id="scan-grid" style="display:none"></div>
   </div>
   <div class="card">
-    <h2>Connect to Wi-Fi</h2>
+    <h2>Connect to hotspot</h2>
     <form id="wifi-form">
       <div class="fg"><label>SSID</label>
         <input id="wifi-ssid" placeholder="Select or enter SSID">
       </div>
       <div class="fg"><label>Password</label>
-        <input id="wifi-pass" type="password" placeholder="Wi-Fi password">
+        <input id="wifi-pass" type="password" placeholder="password">
       </div>
       <div class="btns">
         <button type="submit" class="btn-p">Save & Reboot</button>
@@ -187,20 +199,23 @@ input[type="color"] { cursor:pointer }
   <div class="card">
     <h2>MQTT</h2>
     <form id="mqtt-form">
-      <div class="fg"><label>Broker URL</label>
+      <div class="fg"><label id="lbl-mqtt-broker">Broker URL</label>
         <input id="mqtt-broker" placeholder="mqtt://broker.example.com:1883">
       </div>
-      <div class="fg"><label>Username</label><input id="mqtt-user" placeholder="(optional)"></div>
-      <div class="fg"><label>Password</label><input id="mqtt-pass" type="password" placeholder="(optional)"></div>
-      <div class="fg"><label>Topic prefix</label>
-        <input id="mqtt-prefix" placeholder="espx/&lt;device-id&gt;">
-        <div class="hint">Topics: <code>&lt;prefix&gt;/state</code>, <code>/sensors</code>, <code>/attrs</code>, <code>/cmd/…</code></div>
+      <div class="fg"><label id="lbl-mqtt-user">Username</label><input id="mqtt-user" placeholder="(optional)"></div>
+      <div class="fg"><label id="lbl-mqtt-pass">Password</label><input id="mqtt-pass" type="password" placeholder="(optional)"></div>
+      <div class="fg"><label id="lbl-mqtt-prefix">Topic prefix</label>
+        <div style="display:flex;align-items:center">
+          <span style="padding:.5rem .5rem .5rem .6rem;background:var(--bg);border:1px solid var(--border);border-right:none;border-radius:.4rem 0 0 .4rem;font-size:.85rem;color:var(--muted);height:2.35rem;line-height:1.35rem;box-sizing:border-box">espx/</span>
+          <input id="mqtt-prefix" style="border-radius:0 .4rem .4rem 0;height:2.35rem" placeholder="">
+        </div>
+        <div class="hint" id="hint-topics">Topics: /state, /sensors, /attrs, /cmd/…</div>
       </div>
       <div class="btns">
         <button type="submit" class="btn-p">Save</button>
         <button type="button" class="btn-s" id="btn-reload-mqtt">Reload</button>
       </div>
-      <div class="hint">MQTT reconnect is required after changes: reboot the device.</div>
+      <div class="hint" id="hint-mqtt-reconnect">MQTT reconnect is required after changes: reboot the device.</div>
     </form>
   </div>
 </section>
@@ -222,7 +237,7 @@ input[type="color"] { cursor:pointer }
     <h2>Apply patch</h2>
     <div class="fg"><label>Patch URL (.patch)</label>
       <input id="ota-url" placeholder="http://192.168.1.10:8000/espx.patch">
-      <div class="hint">The patch must be built with <code>detools</code> against the
+      <div class="hint" id="hint-detools">The patch must be built with <code>detools</code> against the
         <b>currently running</b> firmware. A mismatch is rejected before writing.</div>
     </div>
     <div class="btns">
@@ -235,11 +250,11 @@ input[type="color"] { cursor:pointer }
 <!-- ================= System ================= -->
 <section id="tab-system" class="hide">
   <div class="card">
-    <h2>Node identity</h2>
+    <h2>Node</h2>
     <form id="node-form">
       <div class="fg"><label>Name</label><input id="sys-name"></div>
       <div class="fg"><label>Device ID</label><input id="sys-id">
-        <div class="hint">Also used as MQTT client id. Changing it changes all topic paths.</div>
+        <div class="hint" id="hint-device-id">Also used as MQTT client id. Changing it changes all topic paths.</div>
       </div>
       <div class="btns"><button type="submit" class="btn-p">Save</button></div>
     </form>
@@ -255,7 +270,7 @@ input[type="color"] { cursor:pointer }
       <button class="btn-s" id="btn-testmode">Enter test mode</button>
       <button class="btn-d" id="btn-reboot">Reboot</button>
     </div>
-    <p class="hint" style="margin-top:.6rem">
+    <p class="hint" id="hint-test-mode" style="margin-top:.6rem">
       Test mode runs a UART self-test console (no Wi-Fi/MQTT). Also reachable by
       holding the BOOT button for 3&nbsp;s while the device is running.
     </p>
@@ -267,8 +282,8 @@ input[type="color"] { cursor:pointer }
 
 <div id="modal" class="modal">
   <div class="modal-box">
-    <h3>Add device</h3>
-    <div class="fg"><label>Device ID</label><input id="m-id" placeholder="temp_indoor"></div>
+    <h3>Add peripheral</h3>
+    <div class="fg"><label>Peripheral ID</label><input id="m-id" placeholder="e.g. temp_01"></div>
     <div class="fg"><label>Type</label><select id="m-type"></select></div>
     <div id="m-cfg"></div>
     <div class="btns" style="margin-top:1rem">
@@ -291,6 +306,258 @@ input[type="color"] { cursor:pointer }
 </div>
 
 <script>
+/* ---------- i18n ---------- */
+const I18N = {
+  en: {
+    // tabs
+    dashboard: 'Dashboard', peripherals: 'Peripherals', network: 'Network', mqtt: 'MQTT', ota: 'OTA', system: 'System',
+    // header
+    wifi_status: 'Wi-Fi status', mdns: 'mDNS', ws_live: 'ws', connecting: 'connecting…', online: 'online',
+    // dashboard - node
+    node: 'Node', device_id: 'ID', device_name: 'Name', firmware_version: 'Firmware', devices: 'Peripherals',
+    uptime: 'Uptime', free_heap: 'Free heap', ws_clients: 'WebSocket clients',
+    // dashboard - system
+    system: 'System', cpu_load: 'CPU', internal_ram: 'Internal RAM', psram: 'PSRAM',
+    tasks: 'Tasks', internal_low_water: 'Internal min-free', largest_free_block: 'Largest block',
+    // dashboard - live
+    live_values: 'Live values', refresh: 'Refresh', loading: 'Loading…', no_devices_bound: 'No peripherals bound.',
+    // devices
+    bound_devices: 'Bound peripherals', add_device: '+ Add peripheral', device_id_label: 'Peripheral ID', type: 'Type',
+    bound_peripherals: 'Bound peripherals', add_peripheral: '+ Add peripheral',
+    enabled: 'enabled', disabled: 'disabled', read: 'Read', disable: 'Disable', enable: 'Enable',
+    setup: 'Setup', delete: 'Delete', delete_confirm: 'Delete peripheral "{0}"?',
+    device_id_required: 'Peripheral ID required', device_added: 'Peripheral added', add_failed: 'Add failed',
+    // network
+    wifi: 'Hotspot', scan: 'Scan', ssid: 'SSID', ip: 'IP', signal: 'Signal',
+    available_networks: 'Available networks', click_scan: 'Click "Scan" to search for Wi-Fi networks.',
+    scanning: 'scanning...', no_networks_found: 'No networks found.', networks_found: '{0} networks found',
+    signal_excellent: 'excellent', signal_good: 'good', signal_fair: 'fair', signal_weak: 'weak', signal: 'Signal', open: 'Open',
+    connect_wifi: 'Connect to Wi-Fi', password: 'Password', save_reboot: 'Save & Reboot',
+    ssid_required: 'SSID required', wifi_saved: 'Wi-Fi saved — rebooting...',
+    // mqtt
+    broker_url: 'Broker URL', username: 'Username', topic_prefix: 'Topic prefix',
+    hint_topics: 'Topics: /state, /sensors, /attrs, /cmd/…',
+    save: 'Save', reload: 'Reload', saved_reboot: 'Saved — reboot to apply',
+    save_failed: 'Save failed', mqtt_reconnect: 'MQTT reconnect is required after changes: reboot the device.',
+    // ota
+    firmware_update: 'Firmware update (delta OTA)', running_version: 'Running version',
+    state: 'State', progress: 'Progress', received: 'Received', idle: 'IDLE',
+    apply_patch: 'Apply patch', patch_url: 'Patch URL (.patch)',
+    hint_detools: 'The patch must be built with <code>detools</code> against the <b>currently running</b> firmware. A mismatch is rejected before writing.',
+    start_update: 'Start update', cancel: 'Cancel', update_started: 'Update started',
+    cancelling: 'Cancelling…',
+    // system
+    node_identity: 'Node', certificate: 'Certificate', actions: 'Actions',
+    device_id_hint: 'Also used as MQTT client id. Changing it changes all topic paths.',
+    reload_devices: 'Reload peripherals', test_mode: 'Enter factory test mode',
+    reboot: 'Reboot', test_mode_hint: 'Test mode runs a UART self-test console (no Wi-Fi/MQTT). Also reachable by holding the BOOT button for 3\u00a0s while the device is running.',
+    reboot_confirm: 'Reboot the device?', test_mode_confirm: 'Reboot into manufacturing test mode?\n\nWi-Fi/MQTT stop and the\nUART self-test console starts.',
+    entering_test_mode: 'Entering test mode…', devices_reloaded: 'Peripherals reloaded',
+    // setup modal
+    setup_title: 'Setup:', led_index: 'LED Index', all_leds: 'All LEDs', led_n: 'LED {0}',
+    rgb_color: 'RGB Color', brightness: 'Brightness:', applied: 'Applied',
+    quick_red: 'Red', quick_green: 'Green', quick_blue: 'Blue', quick_off: 'OFF',
+    state_label: 'State', on: 'ON', off: 'OFF',
+    no_quick_setup: 'No quick setup available for this peripheral type.',
+    press_button: 'Press the button to trigger events. Current state is polled in real-time.',
+    // dynamic
+    hint_use_add_device: 'Use "Add peripheral".', deleted: 'Deleted', failed: 'Failed',
+    patch_url_required: 'Patch URL required', start_update_confirm: 'Start update from:\n{0}\n\nThe device reboots when finished.',
+    rebooting: 'Rebooting…',
+    // add device modal
+    add_device_title: 'Add peripheral', add: 'Add',
+    peripheral_id_placeholder: 'e.g. temp_01',
+    // toasts / errors
+    read_failed: 'Read failed', toggle_failed: 'Toggle failed', delete_failed: 'Delete failed',
+    start_failed: 'Start failed', cancel_failed: 'Cancel failed', cert_unavailable: 'unavailable',
+    scan_failed: 'Scan failed', copied: 'Copied',
+    // status
+    online: 'online', offline: 'offline', ws_live_text: 'live', polling: 'poll',
+    websocket_label: 'WebSocket',
+    // cert
+    cert_valid: 'valid', cert_subject: 'subject', cert_algorithm: 'algorithm', cert_source: 'source',
+    // misc
+    not_present: 'not present', na: 'n/a',
+  },
+  zh: {
+    // tabs
+    dashboard: '仪表盘', peripherals: '外设', network: '网络', mqtt: 'MQTT', ota: 'OTA', system: '系统',
+    // header
+    wifi_status: 'Wi-Fi 状态', mdns: 'mDNS', ws_live: 'ws', connecting: '连接中…', online: '在线',
+    // dashboard - node
+    node: '节点', device_id: 'ID', device_name: '名称', firmware_version: '固件版本', devices: '外设',
+    uptime: '运行时间', free_heap: '可用内存', ws_clients: 'WebSocket 客户端',
+    // dashboard - system
+    system: '系统', cpu_load: 'CPU', internal_ram: '内部 RAM', psram: 'PSRAM',
+    tasks: '任务数', internal_low_water: '最小空闲', largest_free_block: '最大块',
+    // dashboard - live
+    live_values: '实时数值', refresh: '刷新', loading: '加载中…', no_devices_bound: '未绑定外设。',
+    // devices
+    bound_devices: '已绑定外设', add_device: '+ 添加外设', device_id_label: '外设 ID', type: '类型',
+    bound_peripherals: '已绑定外设', add_peripheral: '+ 添加外设',
+    enabled: '已启用', disabled: '已禁用', read: '读取', disable: '禁用', enable: '启用',
+    setup: '设置', delete: '删除', delete_confirm: '删除外设 "{0}"？',
+    device_id_required: '请输入外设 ID', device_added: '外设已添加', add_failed: '添加失败',
+    // network
+    wifi: '热点', scan: '扫描', ssid: 'SSID', ip: 'IP', signal: '信号',
+    available_networks: '可用网络', click_scan: '点击"扫描"搜索 Wi-Fi 网络。',
+    scanning: '扫描中...', no_networks_found: '未找到网络。', networks_found: '找到 {0} 个网络',
+    signal_excellent: '优', signal_good: '良', signal_fair: '中', signal_weak: '差', signal: '信号', open: '开放',
+    connect_wifi: '连接 Wi-Fi', password: '密码', save_reboot: '保存并重启',
+    ssid_required: '请输入 SSID', wifi_saved: 'Wi-Fi 已保存 — 正在重启...',
+    // mqtt
+    broker_url: 'Broker 地址', username: '用户名', topic_prefix: '主题前缀',
+    hint_topics: '主题: /state, /sensors, /attrs, /cmd/…',
+    save: '保存', reload: '重载', saved_reboot: '已保存 — 重启后生效',
+    save_failed: '保存失败', mqtt_reconnect: 'MQTT 配置变更后需要重启设备才能重连。',
+    // ota
+    firmware_update: '固件更新 (差分包 OTA)', running_version: '当前版本',
+    state: '状态', progress: '进度', received: '已接收', idle: '空闲',
+    apply_patch: '应用补丁', patch_url: '补丁 URL (.patch)',
+    hint_detools: '补丁必须使用 <code>detools</code> 基于<b>当前运行</b>的固件构建。不匹配将在写入前被拒绝。',
+    start_update: '开始更新', cancel: '取消', update_started: '更新已启动',
+    cancelling: '正在取消…',
+    // system
+    node_identity: '节点', certificate: '证书', actions: '操作',
+    device_id_hint: '同时用作 MQTT 客户端 ID。更改它会改变所有主题路径。',
+    reload_devices: '重载外设', test_mode: '进入工厂测试模式',
+    reboot: '重启', test_mode_hint: '测试模式运行 UART 自检控制台（无 Wi-Fi/MQTT）。设备运行时长按 BOOT 键 3\u00a0秒也可进入。',
+    reboot_confirm: '确认重启设备？', test_mode_confirm: '确认进入生产测试模式？\n\nWi-Fi/MQTT 将停止，\nUART 自检控制台将启动。',
+    entering_test_mode: '正在进入测试模式…', devices_reloaded: '外设已重载',
+    // setup modal
+    setup_title: '设置:', led_index: 'LED 索引', all_leds: '全部 LED', led_n: 'LED {0}',
+    rgb_color: 'RGB 颜色', brightness: '亮度:', applied: '已应用',
+    quick_red: '红', quick_green: '绿', quick_blue: '蓝', quick_off: '关',
+    state_label: '状态', on: '开', off: '关',
+    no_quick_setup: '此类型暂不支持快捷设置。',
+    press_button: '按下按钮触发事件。当前状态实时轮询。',
+    // dynamic
+    hint_use_add_device: '使用"添加外设"。', deleted: '已删除', failed: '失败',
+    patch_url_required: '请输入补丁 URL', start_update_confirm: '开始更新 from:\n{0}\n\n设备将在完成后重启。',
+    rebooting: '正在重启…',
+    // add device modal
+    add_device_title: '添加外设', add: '添加',
+    peripheral_id_placeholder: '例如 temp_01',
+    // toasts / errors
+    read_failed: '读取失败', toggle_failed: '切换失败', delete_failed: '删除失败',
+    start_failed: '启动失败', cancel_failed: '取消失败', cert_unavailable: '不可用',
+    scan_failed: '扫描失败', copied: '已复制',
+    // status
+    online: '在线', offline: '离线', ws_live_text: '实时', polling: '轮询',
+    websocket_label: 'WebSocket',
+    // cert
+    cert_valid: '有效', cert_subject: '主体', cert_algorithm: '算法', cert_source: '来源',
+    // misc
+    not_present: '不存在', na: 'n/a',
+  }
+};
+
+let _lang = localStorage.getItem('espx-lang') || 'zh';
+
+function t(key, ...vals) {
+  const str = (I18N[_lang] && I18N[_lang][key] !== undefined) ? I18N[_lang][key] : (I18N.en[key] || key);
+  return vals.length ? str.replace(/\{(\d+)\}/g, (_, i) => vals[i] != null ? vals[i] : '{' + i + '}') : str;
+}
+
+function setLang(lang) {
+  _lang = lang;
+  localStorage.setItem('espx-lang', lang);
+  document.getElementById('lang-btn').textContent = _lang === 'zh' ? 'English' : '中文';
+  applyLang();
+}
+
+function applyLang() {
+  // tabs
+  document.querySelector('[data-tab="dashboard"]').textContent = t('dashboard');
+  document.querySelector('[data-tab="peripherals"]').textContent = t('peripherals');
+  document.querySelector('[data-tab="network"]').textContent = t('network');
+  document.querySelector('[data-tab="mqtt"]').textContent = t('mqtt');
+  document.querySelector('[data-tab="ota"]').textContent = t('ota');
+  document.querySelector('[data-tab="system"]').textContent = t('system');
+  // header
+  document.getElementById('hdr-ssid').title = 'SSID';
+  document.getElementById('hdr-mdns').title = t('mdns');
+  document.getElementById('hdr-ws').textContent = t('websocket_label');
+  // lang button text
+  document.getElementById('lang-btn').textContent = _lang === 'zh' ? 'English' : '中文';
+  // dashboard
+  document.querySelector('#tab-dashboard .card h2').childNodes[0].textContent = t('node');
+  document.querySelectorAll('#tab-dashboard .grid .item .lbl').forEach((el, i) => {
+    const keys = ['device_id','device_name','firmware_version','devices','uptime','free_heap','ws_clients'];
+    if (keys[i]) el.textContent = t(keys[i]);
+  });
+  const sysTitle = document.querySelectorAll('#tab-dashboard .card h2');
+  if (sysTitle[1]) sysTitle[1].childNodes[0].textContent = t('system');
+  if (sysTitle[2]) {
+    sysTitle[2].childNodes[0].textContent = t('live_values');
+    const btn = sysTitle[2].querySelector('button');
+    if (btn) btn.textContent = t('refresh');
+  }
+  // peripherals
+  document.querySelector('#tab-peripherals h2').childNodes[0].textContent = t('bound_peripherals');
+  const addBtn = document.getElementById('btn-add');
+  if (addBtn) addBtn.textContent = t('add_peripheral');
+  // network
+  document.querySelector('#tab-network .card h2').childNodes[0].textContent = t('wifi');
+  document.querySelectorAll('#tab-network .grid .lbl').forEach((el, i) => {
+    const keys = ['ssid','ip','signal'];
+    if (keys[i]) el.textContent = t(keys[i]);
+  });
+  document.querySelectorAll('#tab-network .card h2')[1].childNodes[0].textContent = t('available_networks');
+  document.querySelector('#tab-network .card h2 span').textContent = '';
+  document.getElementById('scan-list').textContent = t('click_scan');
+  document.querySelectorAll('#tab-network .card h2')[2].childNodes[0].textContent = t('connect_wifi');
+  document.querySelector('#wifi-form .fg label').textContent = t('ssid');
+  document.querySelector('#wifi-form .fg:nth-child(2) label').textContent = t('password');
+  document.querySelector('#wifi-form button').textContent = t('save_reboot');
+  // mqtt
+  document.querySelector('#tab-mqtt h2').childNodes[0].textContent = t('mqtt');
+  document.getElementById('lbl-mqtt-broker').textContent = t('broker_url');
+  document.getElementById('lbl-mqtt-user').textContent = t('username');
+  document.getElementById('lbl-mqtt-pass').textContent = t('password');
+  document.getElementById('lbl-mqtt-prefix').textContent = t('topic_prefix');
+  document.getElementById('hint-topics').textContent = t('hint_topics');
+  document.querySelector('#mqtt-form button[type="submit"]').textContent = t('save');
+  document.getElementById('btn-reload-mqtt').textContent = t('reload');
+  document.getElementById('hint-mqtt-reconnect').textContent = t('mqtt_reconnect');
+  // hints
+  document.getElementById('hint-detools').innerHTML = t('hint_detools');
+  document.getElementById('hint-device-id').textContent = t('device_id_hint');
+  document.getElementById('hint-test-mode').textContent = t('test_mode_hint');
+  // ota
+  document.querySelectorAll('#tab-ota .card h2')[0].childNodes[0].textContent = t('firmware_update');
+  document.querySelectorAll('#tab-ota .grid .lbl').forEach((el, i) => {
+    const keys = ['running_version','state','progress','received'];
+    if (keys[i]) el.textContent = t(keys[i]);
+  });
+  document.querySelectorAll('#tab-ota .card h2')[1].childNodes[0].textContent = t('apply_patch');
+  document.querySelector('#tab-ota .fg label').textContent = t('patch_url');
+  document.getElementById('btn-ota-start').textContent = t('start_update');
+  document.getElementById('btn-ota-cancel').textContent = t('cancel');
+  // system
+  document.querySelectorAll('#tab-system .card h2').forEach((el, i) => {
+    const keys = ['node_identity','certificate','actions'];
+    if (keys[i]) el.childNodes[0].textContent = t(keys[i]);
+  });
+  document.querySelectorAll('#tab-system .card h2')[0].querySelectorAll('label').forEach((el, i) => {
+    const keys = ['name','device_id'];
+    if (keys[i]) el.textContent = t(keys[i]);
+  });
+  document.getElementById('btn-reload-dev').textContent = t('reload_devices');
+  document.getElementById('btn-testmode').textContent = t('test_mode');
+  document.getElementById('btn-reboot').textContent = t('reboot');
+  // modals
+  document.querySelector('#modal .modal-box h3').textContent = t('add_device_title');
+  document.querySelector('#modal .fg label').textContent = t('device_id_label');
+  document.getElementById('m-id').placeholder = t('peripheral_id_placeholder');
+  document.querySelectorAll('#modal .fg label')[1].textContent = t('type');
+  document.getElementById('m-save').textContent = t('add');
+  document.getElementById('m-cancel').textContent = t('cancel');
+  document.querySelector('#setup-modal .modal-box h3').textContent = t('setup_title');
+  document.getElementById('setup-save').textContent = t('save');
+  document.getElementById('setup-cancel').textContent = t('cancel');
+}
+
 /* ---------- helpers ---------- */
 let TYPES = [];
 
@@ -300,6 +567,12 @@ function toast(msg, kind = 'ok') {
   el.className = 'toast ' + kind + ' show';
   clearTimeout(el._t);
   el._t = setTimeout(() => el.className = 'toast ' + kind, 3200);
+}
+
+function copyVal(el) {
+  const text = el.textContent;
+  if (!text || text === '-') return;
+  navigator.clipboard.writeText(text).then(() => toast(t('copied') || 'Copied')).catch(() => {});
 }
 
 async function api(path, opts = {}) {
@@ -343,19 +616,15 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
 /* ---------- dashboard ---------- */
 async function loadNode() {
   const n = await api('/api/node');
-  // Device ID: show only last 12 hex chars (without 'espx-' prefix)
   const fullId = (n.device_id || '').toLowerCase();
-  const shortId = fullId.replace(/^espx-/, '');
-  document.getElementById('n-id').textContent = shortId || '-';
+  document.getElementById('n-id').innerHTML = `<span>${fullId || '-'}</span><span class="copy-icon">📋</span>`;
   // Name: uppercase format Node-XXXXXX (last 6 chars of device_id uppercase)
   const name = n.name || '-';
-  document.getElementById('n-name').textContent = name || '-';
-  document.getElementById('n-ver').textContent = n.version || '-';
-  document.getElementById('n-count').textContent = n.device_count;
+  document.getElementById('n-name').innerHTML = `<span>${name || '-'}</span><span class="copy-icon">📋</span>`;
+  document.getElementById('n-ver').innerHTML = `<span>${n.version || '-'}</span><span class="copy-icon">📋</span>`;
+  document.getElementById('n-count').textContent = n.peripheral_count;
   document.getElementById('sys-name').value = n.name || '';
   document.getElementById('sys-id').value = fullId;
-  document.getElementById('hdr-status').textContent = 'online';
-  document.getElementById('hdr-dot').classList.add('ok');
 }
 
 // Render a percentage bar. Colour encodes pressure rather than just filling
@@ -378,26 +647,22 @@ function renderSystem(s) {
 
   renderBar('cpu-bar', 'cpu-usage',
             cpu.usage,
-            cpu.usage == null ? 'n/a' : cpu.usage.toFixed(0) + '%');
+            cpu.usage == null ? 'n/a' : cpu.usage.toFixed(1) + '%');
   document.getElementById('cpu-sub').textContent =
     (cpu.freq_mhz ? cpu.freq_mhz + ' MHz x' + (cpu.cores || 2) : '');
 
   if (ram.internal_total != null) {
     renderBar('iram-bar', 'iram-used', ram.internal_used_pct,
-              fmtBytes(ram.internal_free) + ' free');
-    document.getElementById('iram-sub').textContent =
-      'of ' + fmtBytes(ram.internal_total);
+              fmtBytes(ram.internal_free) + ' / ' + fmtBytes(ram.internal_total));
     document.getElementById('iram-min').textContent = fmtBytes(ram.internal_min_free);
     document.getElementById('iram-largest').textContent = fmtBytes(ram.internal_largest);
   }
 
   if (ram.psram_total != null) {
     renderBar('psram-bar', 'psram-used', ram.psram_used_pct,
-              fmtBytes(ram.psram_free) + ' free');
-    document.getElementById('psram-sub').textContent =
-      'of ' + fmtBytes(ram.psram_total);
+              fmtBytes(ram.psram_free) + ' / ' + fmtBytes(ram.psram_total));
   } else {
-    document.getElementById('psram-used').textContent = 'not present';
+    document.getElementById('psram-used').textContent = t('not_present');
   }
 
   document.getElementById('n-tasks').textContent = cpu.tasks != null ? cpu.tasks : '-';
@@ -414,9 +679,7 @@ async function loadSys() {
 
     // Internal RAM is the pool that actually runs out (TLS sessions, Wi-Fi);
     // the headline figure includes PSRAM and hides it.
-    document.getElementById('n-heap').textContent =
-      fmtBytes(s.free_heap || 0) +
-      (s.free_heap_internal != null ? ' (int ' + fmtBytes(s.free_heap_internal) + ')' : '');
+    document.getElementById('n-heap').textContent = fmtBytes(s.free_heap || 0);
 
     document.getElementById('n-ws').textContent = (s.ws_clients != null ? s.ws_clients : 0);
 
@@ -424,21 +687,20 @@ async function loadSys() {
 
     // Full ISO time display (two lines)
     if (s.time) {
-      const [date, time] = s.time.split('T');
-      document.getElementById('hdr-time').innerHTML = date + '<br>' + (time || s.time);
+      const d = new Date(s.time.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+      document.getElementById('hdr-datetime').textContent = d.toLocaleString();
     }
 
     // Wi-Fi status in header
     if (s.wifi_ssid) {
-      document.getElementById('hdr-wifi').textContent = s.wifi_ssid;
-      document.getElementById('hdr-wifi').className = 'badge ok';
+      document.getElementById('hdr-ssid').textContent = s.wifi_ssid;
       document.getElementById('w-ssid').textContent = s.wifi_ssid;
       document.getElementById('w-ip').textContent = s.ip || '-';
       document.getElementById('w-rssi').textContent = (s.wifi_rssi != null ? s.wifi_rssi + ' dBm' : '-');
       document.getElementById('wifi-ssid').value = s.wifi_ssid;
     } else {
-      document.getElementById('hdr-wifi').textContent = 'offline';
-      document.getElementById('hdr-wifi').className = 'badge err';
+      document.getElementById('hdr-ssid').textContent = t('offline');
+      document.getElementById('hdr-ssid').title = t('offline');
     }
 
     // mDNS in header
@@ -450,9 +712,9 @@ async function loadSys() {
 }
 
 async function loadLive() {
-  const devs = await api('/api/devices');
+  const devs = await api('/api/peripherals');
   const box = document.getElementById('live');
-  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound.</div>'; return; }
+  if (!devs.length) { box.innerHTML = '<div class="meta">' + t('no_devices_bound') + '</div>'; return; }
   box.innerHTML = devs.map(d => `
     <div class="row">
       <div>
@@ -469,76 +731,99 @@ async function loadLive() {
 
 /* ---------- devices ---------- */
 async function loadDevices() {
-  const devs = await api('/api/devices');
+  const devs = await api('/api/peripherals');
   const box = document.getElementById('dev-list');
-  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound. Use "Add device".</div>'; return; }
+  if (!box) return;
+  if (!devs.length) { box.innerHTML = '<div class="meta">' + t('no_devices_bound') + ' ' + t('hint_use_add_device') + '</div>'; return; }
   box.innerHTML = devs.map(d => `
     <div class="row">
       <div>
         <strong>${esc(d.id)}</strong>
         <span class="badge">${esc(d.type)}</span>
-        <span class="badge ${d.enabled ? 'ok' : 'warn'}">${d.enabled ? 'enabled' : 'disabled'}</span>
+        <span class="badge ${d.enabled ? 'ok' : 'warn'}">${d.enabled ? t('enabled') : t('disabled')}</span>
         <div class="meta">${json(d.config)}</div>
       </div>
       <div class="btns">
-        <button class="btn-s" onclick="devRead('${esc(d.id)}')">Read</button>
-        <button class="btn-s" onclick="devToggle('${esc(d.id)}',${!d.enabled})">${d.enabled ? 'Disable' : 'Enable'}</button>
-        <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">Setup</button>
-        <button class="btn-d" onclick="devDel('${esc(d.id)}')">Delete</button>
+        ${d.type === 'ws2812' ? `
+          <button class="btn-s" style="background:#ff0000;color:#fff" onclick="quickWrite('${esc(d.id)}', '#ff0000')">${t('quick_red')}</button>
+          <button class="btn-s" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
+          <button class="btn-s" style="background:#0066ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0066ff')">${t('quick_blue')}</button>
+          <button class="btn-s" onclick="quickWrite('${esc(d.id)}', '#000000')">${t('quick_off')}</button>
+          <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
+        ` : `
+          <button class="btn-s" onclick="devRead('${esc(d.id)}')">${t('read')}</button>
+          <button class="btn-s" onclick="devToggle('${esc(d.id)}',${!d.enabled})">${d.enabled ? t('disable') : t('enable')}</button>
+          <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
+        `}
+        <button class="btn-d" onclick="devDel('${esc(d.id)}')">${t('delete')}</button>
       </div>
     </div>`).join('');
 }
 
 async function devRead(id) {
   if (wsSend({ type: 'read', id })) return;       // reply arrives over the socket
-  try { toast(id + ': ' + JSON.stringify(await api('/api/devices/' + id + '/read', { method: 'POST' })), 'ok'); }
-  catch (e) { toast('Read failed: ' + e.message, 'err'); }
+  try { toast(id + ': ' + JSON.stringify(await api('/api/peripherals/' + id + '/read', { method: 'POST' })), 'ok'); }
+  catch (e) { toast(t('read_failed') + ': ' + e.message, 'err'); }
 }
 async function devToggle(id, en) {
-  try { await api('/api/devices/' + id + '/enable', { method: 'POST', body: JSON.stringify({ enabled: en }) }); refresh(); }
+  try { await api('/api/peripherals/' + id + '/enable', { method: 'POST', body: JSON.stringify({ enabled: en }) }); refresh(); }
   catch (e) { toast(e.message, 'err'); }
 }
 async function devDel(id) {
-  if (!confirm('Delete device "' + id + '"?')) return;
-  try { await api('/api/devices/' + id, { method: 'DELETE' }); toast('Deleted'); refresh(); }
+  if (!confirm(t('delete_confirm', id))) return;
+  try { await api('/api/peripherals/' + id, { method: 'DELETE' }); toast(t('deleted')); refresh(); }
   catch (e) { toast(e.message, 'err'); }
 }
 
 /* ---------- device setup modal ---------- */
 const setupModal = document.getElementById('setup-modal');
 let gSetupDeviceId = null;
+let gSetupType = null;
 
 async function openSetup(id, type) {
+  console.log('openSetup called:', id, type);
+  const nameEl = document.getElementById('setup-name');
+  const contentEl = document.getElementById('setup-content');
+  const modal = document.getElementById('setup-modal');
+  console.log('Elements:', nameEl, contentEl, modal);
+  if (!nameEl || !contentEl) { console.error('Modal elements not found!'); return; }
   gSetupDeviceId = id;
-  document.getElementById('setup-name').textContent = id;
-  const content = document.getElementById('setup-content');
+  gSetupType = type;
+  nameEl.textContent = id;
+  const content = contentEl;
 
   if (type === 'ws2812') {
     // Fetch device config to get LED count
     let ledCount = 1;
     try {
-      const devs = await api('/api/devices');
+      const devs = await api('/api/peripherals');
       const dev = devs.find(d => d.id === id);
       if (dev && dev.config && dev.config.count) {
         ledCount = dev.config.count;
       }
     } catch(e) {}
     // Build index options
-    let indexOptions = `<option value="-1">All LEDs</option>`;
+    let indexOptions = `<option value="-1">${t('all_leds')}</option>`;
     for (let i = 0; i < ledCount; i++) {
-      indexOptions += `<option value="${i}">LED ${i}</option>`;
+      indexOptions += `<option value="${i}">${t('led_n', i)}</option>`;
     }
     content.innerHTML = `
-      <div class="fg"><label>LED Index</label>
+      <div class="fg"><label>${t('led_index')}</label>
         <select id="setup-index">${indexOptions}</select>
       </div>
-      <div class="fg"><label>RGB Color</label>
+      <div class="fg"><label>${t('rgb_color')}</label>
         <div style="display:flex;gap:.5rem;align-items:center">
           <input type="color" id="setup-rgb" value="#ff0000" style="width:60px;height:36px;padding:2px;border-radius:.4rem">
           <input type="text" id="setup-rgb-text" value="#ff0000" placeholder="#rrggbb" style="flex:1">
         </div>
       </div>
-      <div class="fg"><label>Brightness: <span id="setup-bright-val">128</span></label>
+      <div class="btns" style="margin-bottom:.7rem">
+        <button class="btn-s" style="background:#ff0000;color:#fff" onclick="setQuickColor('#ff0000')">${t('quick_red')}</button>
+        <button class="btn-s" style="background:#00ff00;color:#fff" onclick="setQuickColor('#00ff00')">${t('quick_green')}</button>
+        <button class="btn-s" style="background:#0000ff;color:#fff" onclick="setQuickColor('#0066ff')">${t('quick_blue')}</button>
+        <button class="btn-s" onclick="setQuickColor('#000000')">${t('quick_off')}</button>
+      </div>
+      <div class="fg"><label>${t('brightness')} <span id="setup-bright-val">128</span></label>
         <input type="range" id="setup-brightness" min="0" max="255" value="128" style="width:100%">
       </div>
     `;
@@ -555,34 +840,56 @@ async function openSetup(id, type) {
     });
   } else if (type === 'relay') {
     content.innerHTML = `
-      <div class="fg"><label>State</label>
+      <div class="fg"><label>${t('state_label')}</label>
         <select id="setup-state">
-          <option value="true">ON</option>
-          <option value="false">OFF</option>
+          <option value="true">${t('on')}</option>
+          <option value="false">${t('off')}</option>
         </select>
       </div>
     `;
   } else if (type === 'button') {
-    content.innerHTML = `
-      <div class="meta">Press the button to trigger events. Current state is polled in real-time.</div>
-    `;
+    content.innerHTML = `<div class="meta">${t('press_button')}</div>`;
   } else {
-    content.innerHTML = `<div class="meta">No quick setup available for this device type.</div>`;
+    content.innerHTML = `<div class="meta">${t('no_quick_setup')}</div>`;
   }
 
   setupModal.classList.add('show');
+}
+
+function setQuickColor(hex) {
+  const brightness = hex === '#000000' ? 0 : 128;
+  const colorInput = document.getElementById('setup-rgb');
+  const textInput = document.getElementById('setup-rgb-text');
+  const brightSlider = document.getElementById('setup-brightness');
+  const brightVal = document.getElementById('setup-bright-val');
+  if (colorInput) colorInput.value = hex;
+  if (textInput) textInput.value = hex;
+  if (brightSlider) brightSlider.value = brightness;
+  if (brightVal) brightVal.textContent = brightness;
+}
+
+async function quickWrite(id, hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  const brightness = hex === '#000000' ? 0 : 128;
+  try {
+    await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify({ all: { r, g, b }, brightness }) });
+    toast(t('applied'));
+  } catch (e) { toast(t('failed') + ': ' + e.message, 'err'); }
 }
 
 document.getElementById('setup-cancel').addEventListener('click', () => setupModal.classList.remove('show'));
 
 document.getElementById('setup-save').addEventListener('click', async () => {
   const id = gSetupDeviceId;
-  const name = document.getElementById('setup-name').textContent;
-  const content = document.getElementById('setup-content');
+  const nameEl = document.getElementById('setup-name');
+  if (!nameEl) return;
+  const contentEl = document.getElementById('setup-content');
   let value = {};
 
-  // Detect device type from content
-  if (document.getElementById('setup-rgb')) {
+  // Detect device type from saved type
+  if (gSetupType === 'ws2812') {
     const hex = document.getElementById('setup-rgb-text').value;
     const r = parseInt(hex.slice(1,3), 16);
     const g = parseInt(hex.slice(3,5), 16);
@@ -594,15 +901,15 @@ document.getElementById('setup-save').addEventListener('click', async () => {
     } else {
       value = { all: { r, g, b }, brightness };
     }
-  } else if (document.getElementById('setup-state')) {
+  } else if (gSetupType === 'relay') {
     value = { state: document.getElementById('setup-state').value === 'true' };
   }
 
   try {
-    await api('/api/devices/' + id + '/write', { method: 'POST', body: JSON.stringify(value) });
-    toast('Applied');
+    await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify(value) });
+    toast(t('applied'));
     setupModal.classList.remove('show');
-  } catch (e) { toast('Failed: ' + e.message, 'err'); }
+  } catch (e) { toast(t('failed') + ': ' + e.message, 'err'); }
 });
 
 /* ---------- add device modal ---------- */
@@ -630,7 +937,7 @@ function renderCfg(type) {
 document.getElementById('m-save').addEventListener('click', async () => {
   const id = document.getElementById('m-id').value.trim();
   const type = document.getElementById('m-type').value;
-  if (!id) { toast('Device ID required', 'warn'); return; }
+  if (!id) { toast(t('device_id_required'), 'warn'); return; }
 
   const config = {};
   document.querySelectorAll('#m-cfg input').forEach(el => {
@@ -639,11 +946,11 @@ document.getElementById('m-save').addEventListener('click', async () => {
   });
 
   try {
-    await api('/api/devices', { method: 'POST', body: JSON.stringify({ id, type, config }) });
+    await api('/api/peripherals', { method: 'POST', body: JSON.stringify({ id, type, config }) });
     modal.classList.remove('show');
-    toast('Device added');
+    toast(t('device_added'));
     refresh();
-  } catch (e) { toast('Add failed: ' + e.message, 'err'); }
+  } catch (e) { toast(t('add_failed') + ': ' + e.message, 'err'); }
 });
 
 /* ---------- mqtt ---------- */
@@ -653,7 +960,11 @@ async function loadMqtt() {
     document.getElementById('mqtt-broker').value = n.mqtt_broker || '';
     document.getElementById('mqtt-user').value = n.mqtt_username || '';
     document.getElementById('mqtt-pass').value = n.mqtt_password || '';
-    document.getElementById('mqtt-prefix').value = n.mqtt_topic_prefix || '';
+    const deviceId = n.device_id || '';
+    const prefix = n.mqtt_topic_prefix || '';
+    // Use stored prefix (strip espx/ for display), or default to device_id
+    const displayPrefix = prefix.startsWith('espx/') ? prefix.slice(5) : (prefix || deviceId);
+    document.getElementById('mqtt-prefix').value = displayPrefix || deviceId;
   } catch (e) { /* none yet */ }
 }
 
@@ -665,11 +976,11 @@ document.getElementById('mqtt-form').addEventListener('submit', async e => {
     mqtt_broker: document.getElementById('mqtt-broker').value.trim(),
     mqtt_username: document.getElementById('mqtt-user').value.trim(),
     mqtt_password: document.getElementById('mqtt-pass').value,
-    mqtt_topic_prefix: document.getElementById('mqtt-prefix').value.trim()
+    mqtt_topic_prefix: 'espx/' + document.getElementById('mqtt-prefix').value.trim().replace(/^espx\//, '')
   };
   try { await api('/api/network', { method: 'PUT', body: JSON.stringify(body) });
-        toast('Saved — reboot to apply'); }
-  catch (err) { toast('Save failed: ' + err.message, 'err'); }
+        toast(t('saved_reboot')); }
+  catch (err) { toast(t('save_failed') + ': ' + err.message, 'err'); }
 });
 
 /* ---------- node identity ---------- */
@@ -680,7 +991,7 @@ document.getElementById('node-form').addEventListener('submit', async e => {
     device_id: document.getElementById('sys-id').value.trim()
   };
   try { await api('/api/node', { method: 'PUT', body: JSON.stringify(body) });
-        toast('Saved — reboot to apply'); loadNode(); }
+        toast(t('saved_reboot')); loadNode(); }
   catch (err) { toast('Save failed: ' + err.message, 'err'); }
 });
 
@@ -692,15 +1003,20 @@ async function loadOta() {
   try { st = await api('/api/ota/status'); } catch (e) { return; }
 
   document.getElementById('ota-ver').textContent = st.running_version || '-';
-  document.getElementById('ota-state').textContent = st.state || 'IDLE';
-  document.getElementById('ota-prog').textContent = (st.progress || 0) + '%';
-  document.getElementById('ota-bytes').textContent =
-    fmtBytes(st.bytes_read || 0) + (st.total_size > 0 ? ' / ' + fmtBytes(st.total_size) : '');
-  document.getElementById('ota-bar').style.width = (st.progress || 0) + '%';
-  document.getElementById('ota-err').textContent = st.error || '';
+  document.getElementById('ota-state').textContent = st.state || t('idle');
   document.getElementById('ota-url').value = document.getElementById('ota-url').value || st.url || '';
+  document.getElementById('ota-err').textContent = st.error || '';
 
   const running = !!st.running;
+  if (running) {
+    document.getElementById('ota-prog').textContent = (st.progress || 0) + '%';
+    document.getElementById('ota-bytes').textContent =
+      fmtBytes(st.bytes_read || 0) + (st.total_size > 0 ? ' / ' + fmtBytes(st.total_size) : '');
+    document.getElementById('ota-bar').style.width = (st.progress || 0) + '%';
+    document.getElementById('ota-bar').parentElement.style.display = '';
+  } else {
+    document.getElementById('ota-bar').parentElement.style.display = 'none';
+  }
   document.getElementById('btn-ota-start').disabled = running;
   document.getElementById('btn-ota-cancel').disabled = !running;
 
@@ -709,15 +1025,15 @@ async function loadOta() {
 
 document.getElementById('btn-ota-start').addEventListener('click', async () => {
   const url = document.getElementById('ota-url').value.trim();
-  if (!url) { toast('Patch URL required', 'warn'); return; }
-  if (!confirm('Start update from:\n' + url + '\n\nThe device reboots when finished.')) return;
+  if (!url) { toast(t('patch_url_required'), 'warn'); return; }
+  if (!confirm(t('start_update_confirm', url))) return;
   try { await api('/api/ota/start', { method: 'POST', body: JSON.stringify({ url }) });
-        toast('Update started'); }
+        toast(t('update_started')); }
   catch (e) { toast('Start failed: ' + e.message, 'err'); }
 });
 
 document.getElementById('btn-ota-cancel').addEventListener('click', async () => {
-  try { await api('/api/ota/cancel', { method: 'POST' }); toast('Cancelling…', 'warn'); }
+  try { await api('/api/ota/cancel', { method: 'POST' }); toast(t('cancelling'), 'warn'); }
   catch (e) { toast(e.message, 'err'); }
 });
 
@@ -726,42 +1042,41 @@ async function loadCert() {
   try {
     const c = await api('/api/certs/info');
     document.getElementById('cert-info').innerHTML =
-      `valid: <b>${c.valid}</b> · subject: <b>${esc(c.device || '-')}</b> · ` +
-      `algorithm: <b>${esc(c.algorithm || '-')}</b> · source: <b>${esc(c.source || '-')}</b>`;
-  } catch (e) { document.getElementById('cert-info').textContent = 'unavailable'; }
+      `${t('cert_valid')}: <b>${c.valid}</b> · ${t('cert_subject')}: <b>${esc(c.device || '-')}</b> · ` +
+      `${t('cert_algorithm')}: <b>${esc(c.algorithm || '-')}</b> · ${t('cert_source')}: <b>${esc(c.source || '-')}</b>`;
+  } catch (e) { document.getElementById('cert-info').textContent = t('cert_unavailable'); }
 }
 
 document.getElementById('btn-reload-dev').addEventListener('click', async () => {
-  try { await api('/api/devices/reload', { method: 'POST' }); toast('Devices reloaded'); refresh(); }
+  try { await api('/api/peripherals/reload', { method: 'POST' }); toast(t('devices_reloaded')); refresh(); }
   catch (e) { toast(e.message, 'err'); }
 });
 
 document.getElementById('btn-reboot').addEventListener('click', async () => {
-  if (!confirm('Reboot the device?')) return;
-  try { await api('/api/system/reboot', { method: 'POST' }); toast('Rebooting…', 'warn'); }
+  if (!confirm(t('reboot_confirm'))) return;
+  try { await api('/api/system/reboot', { method: 'POST' }); toast(t('rebooting'), 'warn'); }
   catch (e) { /* connection drops expected */ }
 });
 
 document.getElementById('btn-testmode').addEventListener('click', async () => {
-  if (!confirm('Reboot into manufacturing test mode?\n\nWi-Fi/MQTT stop and the\nUART self-test console starts.')) return;
-  try { await api('/api/system/testmode', { method: 'POST' }); toast('Entering test mode…', 'warn'); }
+  if (!confirm(t('test_mode_confirm'))) return;
+  try { await api('/api/system/testmode', { method: 'POST' }); toast(t('entering_test_mode'), 'warn'); }
   catch (e) { /* connection drops expected */ }
 });
 
 /* ---------- WebSocket live updates ---------- */
 let ws = null, wsRetry = 0, wsAlive = false;
 
-function wsSetState(ok) {
-  wsAlive = ok;
-  const el = document.getElementById('hdr-live');
-  el.className = 'badge ' + (ok ? 'ok' : 'err');
-  el.textContent = ok ? 'live' : 'poll';
+function wsSetState(state) {
+  wsAlive = state === 'connected';
+  document.getElementById('hdr-dot').className = 'dot ' + state;
 }
 
 function renderState(msg) {
   const box = document.getElementById('live');
+  if (!box) return;
   const devs = msg.devices || [];
-  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound.</div>'; return; }
+  if (!devs.length) { box.innerHTML = '<div class="meta">' + t('no_devices_bound') + '</div>'; return; }
   box.innerHTML = devs.map(d => `
     <div class="row">
       <div>
@@ -776,22 +1091,31 @@ function renderState(msg) {
     </div>`).join('');
 
   if (msg.time) {
-    document.getElementById('n-time').textContent = msg.time;
-    document.getElementById('hdr-time').textContent = msg.time.split('T')[1] || msg.time;
+    const dt = document.getElementById('hdr-datetime');
+    if (dt) {
+      dt.textContent = msg.time;
+      try {
+        const d = new Date(msg.time.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+        dt.textContent = d.toLocaleString();
+      } catch(e) {}
+    }
   }
-  if (typeof msg.uptime === 'number') document.getElementById('n-up').textContent = fmtUptime(msg.uptime);
-  if (typeof msg.ws_clients === 'number') document.getElementById('n-ws').textContent = msg.ws_clients;
+  const nUp = document.getElementById('n-up');
+  if (typeof msg.uptime === 'number' && nUp) nUp.textContent = fmtUptime(msg.uptime);
+  const nWs = document.getElementById('n-ws');
+  if (typeof msg.ws_clients === 'number' && nWs) nWs.textContent = msg.ws_clients;
   if (msg.cpu || msg.ram) renderSystem(msg);
 }
 
 function wsConnect() {
+  wsSetState('connecting');
   const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
   try { ws = new WebSocket(proto + location.host + '/ws'); }
-  catch (e) { wsSetState(false); return; }
+  catch (e) { wsSetState('disconnected'); return; }
 
-  ws.onopen = () => { wsRetry = 0; wsSetState(true); };
+  ws.onopen = () => { wsRetry = 0; wsSetState('connected'); };
   ws.onclose = () => {
-    wsSetState(false);
+    wsSetState('disconnected');
     // back off, but keep trying: a reboot or a dropped AP must recover
     wsRetry = Math.min(wsRetry + 1, 6);
     setTimeout(wsConnect, 1000 * wsRetry);
@@ -803,8 +1127,8 @@ function wsConnect() {
     switch (msg.type) {
       case 'hello':
         if (msg.time) {
-          const [date, time] = msg.time.split('T');
-          document.getElementById('hdr-time').innerHTML = date + '<br>' + (time || msg.time);
+          const d = new Date(msg.time.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+          document.getElementById('hdr-datetime').textContent = d.toLocaleString();
         }
         break;
       case 'state':
@@ -837,22 +1161,27 @@ function wsSend(obj) {
 async function scanWifi() {
   const btn = document.getElementById('btn-scan');
   const list = document.getElementById('scan-list');
+  const grid = document.getElementById('scan-grid');
   const status = document.getElementById('scan-status');
+  grid.style.display = 'none';
   btn.disabled = true;
-  status.textContent = 'scanning...';
-  list.innerHTML = '<div class="meta">Scanning...</div>';
+  status.textContent = t('scanning');
+  list.innerHTML = '<div class="meta">' + t('scanning') + '</div>';
   try {
     const results = await api('/api/wifi/scan', { method: 'POST' });
     if (!results.networks || results.networks.length === 0) {
-      list.innerHTML = '<div class="meta">No networks found.</div>';
+      list.innerHTML = '<div class="meta">' + t('no_networks_found') + '</div>';
+      grid.style.display = 'none';
     } else {
       // Sort by signal strength (strongest first)
       const sorted = [...results.networks].sort((a, b) => b.rssi - a.rssi);
       // Two-column grid with detailed info
-      list.innerHTML = '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.6rem">' +
+      list.innerHTML = '';
+      grid.style.display = '';
+      grid.innerHTML = '<div class="grid" style="grid-template-columns:repeat(2,1fr);gap:.6rem">' +
         sorted.map(n => {
           const rssi = n.rssi || -100;
-          const signal = rssi >= -50 ? 'excellent' : rssi >= -60 ? 'good' : rssi >= -70 ? 'fair' : 'weak';
+          const signal = rssi >= -50 ? t('signal_excellent') : rssi >= -60 ? t('signal_good') : rssi >= -70 ? t('signal_fair') : t('signal_weak');
           const signalColor = rssi >= -50 ? 'var(--ok)' : rssi >= -60 ? 'var(--ok)' : rssi >= -70 ? 'var(--warn)' : 'var(--err)';
           return `
           <div class="card" style="cursor:pointer;padding:.75rem;margin-bottom:0" onclick="selectNetwork('${esc(n.ssid)}')">
@@ -861,8 +1190,8 @@ async function scanWifi() {
               <span class="badge" style="background:${signalColor};color:#fff">${signal}</span>
             </div>
             <div style="display:flex;gap:1rem;margin-top:.4rem;font-size:.78rem;color:var(--muted)">
-              <span>Signal: ${rssi} dBm</span>
-              <span>${n.auth || 'Open'}</span>
+              <span>${t('signal')}: ${rssi} dBm</span>
+              <span>${n.auth || t('open')}</span>
               <span>${n.bssid || ''}</span>
             </div>
           </div>`;
@@ -870,7 +1199,7 @@ async function scanWifi() {
     }
     status.textContent = results.networks ? results.networks.length + ' networks found' : '';
   } catch (e) {
-    list.innerHTML = '<div class="meta" style="color:var(--err)">Scan failed: ' + esc(e.message) + '</div>';
+    list.innerHTML = '<div class="meta" style="color:var(--err)">' + t('scan_failed') + ': ' + esc(e.message) + '</div>';
     status.textContent = '';
   }
   btn.disabled = false;
@@ -898,6 +1227,10 @@ document.getElementById('wifi-form').addEventListener('submit', async e => {
 });
 
 /* ---------- init ---------- */
+document.getElementById('lang-btn').addEventListener('click', () => {
+  setLang(_lang === 'zh' ? 'en' : 'zh');
+});
+
 async function refresh() {
   try { await loadNode(); } catch (e) { /* ignore */ }
   try { await loadDevices(); } catch (e) { /* ignore */ }
@@ -905,7 +1238,8 @@ async function refresh() {
 }
 
 async function init() {
-  try { TYPES = await api('/api/device-types'); } catch (e) { TYPES = []; }
+  applyLang();
+  try { TYPES = await api('/api/peripheral/options'); } catch (e) { TYPES = []; }
   await refresh();
   loadSys(); loadMqtt(); loadOta(); loadCert();
   wsConnect();

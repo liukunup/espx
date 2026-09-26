@@ -124,16 +124,22 @@ static esp_err_t api_node_handler(httpd_req_t *req)
     }
 
     cJSON *json = cJSON_CreateObject();
-    cJSON_AddStringToObject(json, "device_id", node_config_get_device_id());
+    {
+        const char *id = node_config_get_device_id();
+        if (strncmp(id, "espx-", 5) == 0) {
+            id += 5;
+        }
+        cJSON_AddStringToObject(json, "device_id", id);
+    }
     cJSON_AddStringToObject(json, "name", node_config_get_name());
     cJSON_AddStringToObject(json, "version", app_version());
-    cJSON_AddNumberToObject(json, "device_count", device_get_count());
+    cJSON_AddNumberToObject(json, "peripheral_count", device_get_count());
 
     return send_json(req, json, 200);
 }
 
 /**
- * @brief GET /api/devices - list devices with values
+ * @brief GET /api/peripherals - list devices with values
  */
 static esp_err_t api_devices_list_handler(httpd_req_t *req)
 {
@@ -171,7 +177,7 @@ static esp_err_t api_devices_list_handler(httpd_req_t *req)
 }
 
 /**
- * @brief POST /api/devices - add device
+ * @brief POST /api/peripherals - add device
  */
 static esp_err_t api_device_add_handler(httpd_req_t *req)
 {
@@ -206,7 +212,7 @@ static esp_err_t api_device_add_handler(httpd_req_t *req)
 }
 
 /**
- * @brief Helper: parse device id and action from /api/devices/{id}[/{action}]
+ * @brief Helper: parse device id and action from /api/peripherals/{id}[/{action}]
  *
  * @param uri      Request URI
  * @param id_out   Output buffer for device id
@@ -218,7 +224,7 @@ static esp_err_t api_device_add_handler(httpd_req_t *req)
 static bool parse_device_uri(const char *uri, char *id_out, size_t id_size,
                              char *action_out, size_t action_size)
 {
-    const char *prefix = "/api/devices/";
+    const char *prefix = "/api/peripherals/";
     size_t prefix_len = strlen(prefix);
 
     if (strncmp(uri, prefix, prefix_len) != 0) {
@@ -248,13 +254,13 @@ static bool parse_device_uri(const char *uri, char *id_out, size_t id_size,
 }
 
 /**
- * @brief Dispatcher for /api/devices/{id}[/action]
+ * @brief Dispatcher for /api/peripherals/{id}[/action]
  *
- * GET    /api/devices/{id}          - get device info
- * DELETE /api/devices/{id}          - remove device
- * POST   /api/devices/{id}/read     - read value
- * POST   /api/devices/{id}/write    - write value
- * POST   /api/devices/{id}/enable   - enable/disable
+ * GET    /api/peripherals/{id}          - get device info
+ * DELETE /api/peripherals/{id}          - remove device
+ * POST   /api/peripherals/{id}/read     - read value
+ * POST   /api/peripherals/{id}/write    - write value
+ * POST   /api/peripherals/{id}/enable   - enable/disable
  */
 static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
 {
@@ -317,7 +323,7 @@ static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
             return send_json(req, resp, err == ESP_OK ? 200 : 404);
         }
 
-        // POST /api/devices/{id} with new config -> update config
+        // POST /api/peripherals/{id} with new config -> update config
         if (action[0] == '\0') {
             char buf[512];
             int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -342,7 +348,7 @@ static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
         return send_error(req, "Unknown action", 400);
     }
 
-    // ---- GET /api/devices/{id} ----
+    // ---- GET /api/peripherals/{id} ----
     if (req->method == HTTP_GET) {
         cJSON *json = cJSON_CreateObject();
         esp_err_t err = device_get_json(id, json);
@@ -353,7 +359,7 @@ static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
         return send_json(req, json, 200);
     }
 
-    // ---- DELETE /api/devices/{id} ----
+    // ---- DELETE /api/peripherals/{id} ----
     if (req->method == HTTP_DELETE) {
         esp_err_t err = device_remove(id);
         if (err == ESP_OK) {
@@ -368,7 +374,7 @@ static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
 }
 
 /**
- * @brief POST /api/devices/reload - reload all devices
+ * @brief POST /api/peripherals/reload - reload all devices
  */
 static esp_err_t api_devices_reload_handler(httpd_req_t *req)
 {
@@ -379,7 +385,7 @@ static esp_err_t api_devices_reload_handler(httpd_req_t *req)
 }
 
 /**
- * @brief GET /api/device-types - list device types
+ * @brief GET /api/peripheral/options - list device types
  */
 static esp_err_t api_device_types_handler(httpd_req_t *req)
 {
@@ -566,7 +572,17 @@ static esp_err_t api_network_handler(httpd_req_t *req)
         cJSON *cfg = node_config_get();
         cJSON *net = cfg ? cJSON_GetObjectItem(cfg, "network") : NULL;
         cJSON *out = net ? cJSON_Duplicate(net, true) : cJSON_CreateObject();
-        if (cfg) cJSON_Delete(cfg);
+        if (cfg) {
+            // Include device_id for frontend convenience
+            cJSON *node = cJSON_GetObjectItem(cfg, "node");
+            if (node) {
+                cJSON *dev_id = cJSON_GetObjectItem(node, "device_id");
+                if (dev_id) {
+                    cJSON_AddItemToObject(out, "device_id", cJSON_Duplicate(dev_id, true));
+                }
+            }
+            cJSON_Delete(cfg);
+        }
         return send_json(req, out, 200);
     }
 
@@ -868,7 +884,7 @@ esp_err_t web_server_start(void)
 
     /* Wildcards are NOT matched by default: with uri_match_fn == NULL the
      * server does a plain string compare, so a pattern ending in a star never
-     * matches a real path such as "/api/devices/relay_a/read". Every such
+     * matches a real path such as "/api/peripherals/relay_a/read". Every such
      * request would 404 with the server's own "Nothing matches the given URI".
      * Selecting the wildcard matcher is what makes the dispatcher reachable. */
     config.httpd.uri_match_fn = httpd_uri_match_wildcard;
@@ -893,10 +909,10 @@ esp_err_t web_server_start(void)
         { .uri = "/api/system/info",    .method = HTTP_GET,    .handler = api_system_info_handler },
         { .uri = "/api/network",        .method = HTTP_GET,    .handler = api_network_handler },
         { .uri = "/api/network",        .method = HTTP_PUT,    .handler = api_network_handler },
-        { .uri = "/api/devices",        .method = HTTP_GET,    .handler = api_devices_list_handler },
-        { .uri = "/api/devices",        .method = HTTP_POST,   .handler = api_device_add_handler },
-        { .uri = "/api/devices/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },
-        { .uri = "/api/device-types",   .method = HTTP_GET,    .handler = api_device_types_handler },
+        { .uri = "/api/peripherals",        .method = HTTP_GET,    .handler = api_devices_list_handler },
+        { .uri = "/api/peripherals",        .method = HTTP_POST,   .handler = api_device_add_handler },
+        { .uri = "/api/peripherals/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },
+        { .uri = "/api/peripheral/options",   .method = HTTP_GET,    .handler = api_device_types_handler },
         { .uri = "/api/config",         .method = HTTP_GET,    .handler = api_config_get_handler },
         { .uri = "/api/config",         .method = HTTP_POST,   .handler = api_config_apply_handler },
         { .uri = "/api/ota/status",     .method = HTTP_GET,    .handler = api_ota_status_handler },
@@ -908,9 +924,9 @@ esp_err_t web_server_start(void)
         { .uri = "/api/wifi/scan",       .method = HTTP_POST,   .handler = api_wifi_scan_handler },
         { .uri = "/api/wifi/config",     .method = HTTP_PUT,    .handler = api_wifi_config_handler },
         // Wildcard dispatcher must be last
-        { .uri = "/api/devices/*",      .method = HTTP_GET,    .handler = api_device_dispatch_handler },
-        { .uri = "/api/devices/*",      .method = HTTP_POST,   .handler = api_device_dispatch_handler },
-        { .uri = "/api/devices/*",      .method = HTTP_DELETE, .handler = api_device_dispatch_handler },
+        { .uri = "/api/peripherals/*",      .method = HTTP_GET,    .handler = api_device_dispatch_handler },
+        { .uri = "/api/peripherals/*",      .method = HTTP_POST,   .handler = api_device_dispatch_handler },
+        { .uri = "/api/peripherals/*",      .method = HTTP_DELETE, .handler = api_device_dispatch_handler },
     };
 
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {

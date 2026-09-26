@@ -48,7 +48,7 @@ static char g_password[64] = {0};
  */
 static void load_network_config(void)
 {
-    snprintf(g_broker, sizeof(g_broker), "mqtt://test.mosquitto.org:1883");
+    snprintf(g_broker, sizeof(g_broker), "mqtt://broker.example.com:1883");
     g_username[0] = '\0';
     g_password[0] = '\0';
     /* Default prefix is the device id itself: it already carries the product

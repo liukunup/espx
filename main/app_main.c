@@ -10,6 +10,8 @@
 #include <nvs_flash.h>
 #include <esp_system.h>
 #include <esp_heap_caps.h>
+#include <esp_netif.h>
+#include <esp_netif_types.h>
 
 #include "task_util.h"
 #include "app_info.h"
@@ -165,9 +167,22 @@ void app_main(void)
     ota_service_mark_valid();
 
     ESP_LOGI(TAG, "================================================");
-    ESP_LOGI(TAG, "ESPX ready — device id %s, %d device(s) bound",
+    ESP_LOGI(TAG, "ESPX ready — device id %s, %d peripheral(s) bound",
              node_config_get_device_id(), (int)device_get_count());
-    ESP_LOGI(TAG, "Web UI: https://<device-ip>/  (self-signed certificate)");
+    // Get Wi-Fi IP for logging
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif) {
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            char ip_str[16];
+            esp_ip4addr_ntoa(&ip.ip, ip_str, sizeof(ip_str));
+            ESP_LOGI(TAG, "Web UI: https://%s/  (self-signed certificate)", ip_str);
+        } else {
+            ESP_LOGI(TAG, "Web UI: https://<device-ip>/  (self-signed certificate)");
+        }
+    } else {
+        ESP_LOGI(TAG, "Web UI: https://<device-ip>/  (self-signed certificate)");
+    }
     ESP_LOGI(TAG, "Config: POST /api/config or MQTT <prefix>/cmd/config (YAML)");
     ESP_LOGI(TAG, "================================================");
 
