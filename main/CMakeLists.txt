@@ -1,4 +1,19 @@
+set(src_dirs
+    .
+    wifi_prov
+)
+
+set(include_dirs
+    .
+    wifi_prov
+)
+
+set(requires
+    freertos esp_timer
+)
+
 idf_component_register(
-    SRCS "app_main.c"
-    INCLUDE_DIRS "."
+    SRC_DIRS ${src_dirs}
+    INCLUDE_DIRS ${include_dirs}
+    REQUIRES ${requires}
 )
