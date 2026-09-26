@@ -196,9 +196,12 @@ static esp_err_t shiftreg_write(device_t *dev, const cJSON *value)
 
 static esp_err_t shiftreg_default_config(cJSON *config)
 {
+    /* Deliberately avoids GPIO17/18: those are UART1's IO_MUX pins and UART1 is
+     * the AT command interface by default. A suggested default that collides
+     * with a fixed peripheral is a trap. */
     cJSON_AddNumberToObject(config, "data_gpio", 16);
-    cJSON_AddNumberToObject(config, "clock_gpio", 17);
-    cJSON_AddNumberToObject(config, "latch_gpio", 18);
+    cJSON_AddNumberToObject(config, "clock_gpio", 15);
+    cJSON_AddNumberToObject(config, "latch_gpio", 7);
     cJSON_AddNumberToObject(config, "oe_gpio", -1);
     cJSON_AddNumberToObject(config, "count", 1);
     return ESP_OK;

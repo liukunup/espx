@@ -379,7 +379,7 @@ def test_mqtt(dev, args, net):
         "    config: {gpio: 5, active_level: 1}\n"
         "  - id: mq_yaml_sr\n"
         "    type: shiftreg_595\n"
-        "    config: {data_gpio: 16, clock_gpio: 17, latch_gpio: 18, count: 2}\n"
+        "    config: {data_gpio: 16, clock_gpio: 15, latch_gpio: 7, count: 2}\n"
         "remove_devices: [mq1]\n"
     )
     cli.publish(f"{prefix}/cmd/config", yaml_doc, qos=1)

@@ -335,13 +335,14 @@ ALL YAML TESTS PASSED
 
 ### AT 指令手工调试
 
-AT 在 UART1（GPIO4/5）。用第二个 USB-TTL 接上，或临时改到 UART0：
+AT 在 UART1（GPIO17/18，IO_MUX 默认）。用第二个 USB-TTL 接上，或临时改到 UART0：
 
 ```
 CONFIG_ESPX_AT_UART_NUM=0
 ```
 
-> UART0 与日志/产线控制台共用，输出会交错，仅用于临时排查。
+> UART0 与日志/产线控制台共用，输出会交错，仅用于临时排查。此时固件会保留控制台的
+> 引脚不动（不会把日志输出改到 AT 的引脚上），并打印一条警告。
 
 ### 堆与性能
 
@@ -362,12 +363,57 @@ curl -k https://$HOST/api/system/info | python3 -m json.tool
 | 指标 | 数值 |
 |---|---|
 | 内部 RAM 总量 | **345 KB**（这是会耗尽的那个池；PSRAM 8MB 另计） |
-| 启动后内部 RAM 空闲 | 约 180 KB（配网模式下更少） |
+| 启动后内部 RAM 空闲 | **170 KB（已用 51%）** |
+| 16 并发请求时内部 RAM | 空闲 163 KB，低水位 **123 KB** |
+| 最大可分配块（内部） | 88–92 KB |
+| PSRAM 已用 | 约 1%（任务栈 + Wi-Fi/LWIP 缓冲在此） |
 | 每个 TLS 会话内部 RAM | 约 25 KB（4KB in + 4KB out + 握手状态） |
-| `max_open_sockets=4` 并发压力最低点 | 约 40 KB，之后可恢复 |
-| TLS 握手（ECDSA P-256, 240MHz） | 首个约 0.5 s |
+| TLS 握手（ECDSA P-256, 240MHz） | 约 0.5 s |
 | 同连接后续请求（keep-alive） | 12–30 ms |
 | TLS 握手（改用 RSA-2048 时） | 约 1.5 s（**不要用 RSA**） |
+
+### 内部 RAM 优化的做法与效果
+
+优化前：启动空闲 129 KB（已用 63%），16 并发时低水位 40 KB、最大块 31 KB —— 逼近之前
+"服务器彻底拒绝连接"的临界点。四项措施：
+
+| 措施 | 作用 |
+|---|---|
+| `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP` | Wi-Fi/LWIP 缓冲移入 PSRAM（官方推荐用于 octal PSRAM 的 S3） |
+| `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` + `core/task_util.h` | 不碰 flash 的应用任务栈移入 PSRAM |
+| 精简 Wi-Fi 缓冲数量与 LwIP 窗口 | 载荷是小 JSON，默认值是按吞吐调的 |
+| `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | TLS 记录缓冲按需分配 |
+
+结果：启动空闲 129 → **170 KB**，压力低水位 40 → **123 KB**（关键余量 3 倍）。
+
+### 两个必须记住的陷阱
+
+**① PSRAM 栈只对不碰 flash 的任务安全。** IDF 在
+`FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` 的说明里写得很直白：
+"This should only be used for tasks where the stack is **never accessed while the
+cache is disabled**." flash 擦写会关闭 cache，而 PSRAM 走同一个 cache，所以
+带 PSRAM 栈的任务**绝不能**做 flash 操作。本工程里必须留内部栈的任务：
+
+| 任务 | 原因 |
+|---|---|
+| `ota_task` | `esp_ota_write()` 写 flash |
+| `at_service` | `AT+CFG` → `config_apply` → 写 NVS |
+| `ws_push` | WebSocket 下发配置 → 写 NVS |
+| `tm_longpress` | 写测试模式请求标志到 NVS |
+| `wifi_status` | 启动 mDNS，mDNS 会把主机名持久化到 NVS |
+| httpd | 任何会保存配置的 REST 处理器 |
+
+只有 `sys_stats`、`dev_tick`、`mqtt_pub` 可以放 PSRAM。配套规则：
+`espx_task_create()` ↔ `espx_task_delete_self()` 必须成对，混用会 assert：
+```
+assert failed: prvTaskDeleteWithCaps idf_additions.c:133
+```
+
+**② 不要在 TLS 服务器上开 `MBEDTLS_DYNAMIC_FREE_CONFIG_DATA`。** 它自己的说明写着
+"all certificate, private key and DHM data are freed so users should register
+certificate and private key to ssl config object again"。HTTPS 服务器持有一份
+ssl config 服务所有连接且从不重新注册密钥，开启后**第一次握手成功、之后每次都被
+对端以 fatal alert（-0x7780）拒绝**。
 
 据此得出的三条硬性经验：
 

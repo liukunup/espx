@@ -230,7 +230,9 @@ curl -k https://$HOST/api/system/info | python3 -m json.tool
 - 成功 → `\r\nOK\r\n`；失败 → `\r\nERROR\r\n`
 - 查询 → `\r\n+CMD:<值>\r\n\r\nOK\r\n`
 
-默认 **UART1，TX=GPIO4 / RX=GPIO5，115200**（日志与产线控制台在 UART0，互不干扰）。
+默认 **UART1，使用其 IO_MUX 默认引脚 TX=GPIO17 / RX=GPIO18，115200**（日志与产线控制台在 UART0，互不干扰）。
+
+刻意不通过 GPIO 矩阵把 UART1 绕到别的引脚：板子就是按 IO_MUX 默认引脚布线的，绕线既不符合惯例，也容易和 UART2（无 IO_MUX 默认引脚）等需求冲突。需要改引脚时在 menuconfig 里关掉 `ESPX_AT_USE_DEFAULT_PINS`。
 
 | 指令 | 说明 |
 |---|---|

@@ -18,6 +18,7 @@
 #include <nvs_flash.h>
 #include <cJSON.h>
 
+#include "task_util.h"
 #include "app_info.h"
 #include "test_mode.h"
 #include "device_type.h"
@@ -177,7 +178,8 @@ esp_err_t test_mode_start_longpress_watchdog(void)
         return ESP_OK;
     }
 
-    BaseType_t ok = xTaskCreate(longpress_task, "tm_longpress", 3072, NULL, 2, NULL);
+    BaseType_t ok = /* Internal-RAM stack: it writes the NVS test-mode request flag. */
+    xTaskCreate(longpress_task, "tm_longpress", 3072, NULL, 2, NULL);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "Failed to start long-press watchdog");
         return ESP_FAIL;

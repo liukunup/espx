@@ -23,6 +23,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <driver/uart.h>
+#include <soc/uart_pins.h>
 #include <esp_log.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
@@ -30,6 +31,7 @@
 #include <esp_ota_ops.h>
 #include <cJSON.h>
 
+#include "task_util.h"
 #include "app_info.h"
 #include "at_service.h"
 #include "node_config.h"
@@ -46,6 +48,19 @@
 static const char *TAG = "at";
 
 #define AT_UART        ((uart_port_t)CONFIG_ESPX_AT_UART_NUM)
+
+/* IO_MUX default pins of the AT UART (ESP32-S3). UART2 has none: it must be
+ * given explicit pins with CONFIG_ESPX_AT_USE_DEFAULT_PINS disabled. */
+#if CONFIG_ESPX_AT_UART_NUM == 0
+#define AT_DEFAULT_TX_PIN  U0TXD_GPIO_NUM
+#define AT_DEFAULT_RX_PIN  U0RXD_GPIO_NUM
+#elif CONFIG_ESPX_AT_UART_NUM == 1
+#define AT_DEFAULT_TX_PIN  U1TXD_GPIO_NUM
+#define AT_DEFAULT_RX_PIN  U1RXD_GPIO_NUM
+#else
+#define AT_DEFAULT_TX_PIN  (U2TXD_GPIO_NUM)
+#define AT_DEFAULT_RX_PIN  (U2RXD_GPIO_NUM)
+#endif
 #define AT_BUF_SIZE    512
 #define AT_RX_BUF      1024
 #define AT_TX_BUF      1024
@@ -817,18 +832,29 @@ esp_err_t at_service_start(void)
         return err;
     }
 
-    /* Only set the pins when the AT UART is NOT the console UART. Re-pinning
-     * the console's UART would move the log output to the AT pins, which
-     * silently breaks the "temporarily put AT on UART0 to debug" workflow and
-     * leaves the console on pins nothing is listening to. */
+    /* Decide the pins.
+     *
+     * 1. If AT shares the console's UART, its pins are already correct and are
+     *    owned by the console: re-pinning would move the log output to the AT
+     *    pins and break the console.
+     * 2. Otherwise, by default leave the pins to the UART's IO_MUX, which is
+     *    what a board is wired for (UART1 -> TX=17, RX=18 on ESP32-S3).
+     * 3. Explicit pins route through the GPIO matrix, which is required for
+     *    UART2 (no IO_MUX) or when the default pins are taken.
+     */
 #if (CONFIG_ESPX_AT_UART_NUM == CONFIG_ESP_CONSOLE_UART_NUM) && \
     defined(CONFIG_ESP_CONSOLE_UART_DEFAULT)
-    ESP_LOGW(TAG, "AT shares the console UART (UART%d); keeping its pins %d/%d. "
-                  "Log output will interleave with AT replies -- use this for "
-                  "manual debugging only.",
-             CONFIG_ESPX_AT_UART_NUM, CONFIG_ESP_CONSOLE_UART_TX_GPIO,
-             CONFIG_ESP_CONSOLE_UART_RX_GPIO);
-#else
+    ESP_LOGW(TAG, "AT shares the console UART%d; keeping its pins %d/%d. Log "
+                  "output will interleave with AT replies -- manual debugging only.",
+             CONFIG_ESPX_AT_UART_NUM,
+             CONFIG_ESP_CONSOLE_UART_TX_GPIO, CONFIG_ESP_CONSOLE_UART_RX_GPIO);
+#elif defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS)
+    ESP_LOGI(TAG, "AT pins: UART%d IO_MUX default", CONFIG_ESPX_AT_UART_NUM);
+#endif
+
+#if !defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS) && \
+    !((CONFIG_ESPX_AT_UART_NUM == CONFIG_ESP_CONSOLE_UART_NUM) && \
+      defined(CONFIG_ESP_CONSOLE_UART_DEFAULT))
     err = uart_set_pin(AT_UART, CONFIG_ESPX_AT_UART_TX_GPIO,
                        CONFIG_ESPX_AT_UART_RX_GPIO,
                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
@@ -839,15 +865,22 @@ esp_err_t at_service_start(void)
 #endif
 
     s_running = true;
-    if (xTaskCreate(at_task, "at_service", 6144, NULL, 5, &s_task) != pdPASS) {
+    if (/* Internal-RAM stack: AT+CFG writes NVS. See task_util.h. */
+    xTaskCreate(at_task, "at_service", 6144, NULL, 5, &s_task) != pdPASS) {
         s_running = false;
         ESP_LOGE(TAG, "failed to start the AT task");
         return ESP_FAIL;
     }
 
+#if defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS)
+    ESP_LOGI(TAG, "AT service ready on UART%d (default pins: TX=%d RX=%d, %d baud)",
+             CONFIG_ESPX_AT_UART_NUM, AT_DEFAULT_TX_PIN, AT_DEFAULT_RX_PIN,
+             CONFIG_ESPX_AT_UART_BAUD);
+#else
     ESP_LOGI(TAG, "AT service ready on UART%d (TX=%d RX=%d, %d baud)",
              CONFIG_ESPX_AT_UART_NUM, CONFIG_ESPX_AT_UART_TX_GPIO,
              CONFIG_ESPX_AT_UART_RX_GPIO, CONFIG_ESPX_AT_UART_BAUD);
+#endif
     return ESP_OK;
 }
 

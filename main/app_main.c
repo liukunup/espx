@@ -11,6 +11,7 @@
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 
+#include "task_util.h"
 #include "app_info.h"
 #include "led_driver.h"
 #include "event_bus.h"
@@ -29,6 +30,7 @@
 #include "ota_service/ota_service.h"
 #include "net_services/net_services.h"
 #include "core/sys_stats.h"
+#include "core/defaults.h"
 #include "at_service/at_service.h"
 
 static const char *TAG = "app_main";
@@ -114,7 +116,13 @@ void app_main(void)
         }
     }
 
-    /* ---- 6. Network ---------------------------------------------------- */
+    /* ---- 6. Defaults ---------------------------------------------------- */
+    /* A node with nothing bound is indistinguishable from a broken one; give a
+     * fresh unit its on-board LED so there is something to see and control.
+     * Runs after factory provisioning, which takes precedence. */
+    defaults_seed_once();
+
+    /* ---- 7. Network ---------------------------------------------------- */
     ESP_LOGI(TAG, "Initializing Wi-Fi...");
     ESP_ERROR_CHECK(wifi_prov_init());
     ESP_ERROR_CHECK(wifi_prov_start(NULL));
@@ -167,6 +175,7 @@ void app_main(void)
 
     /* ---- 11. Report the Wi-Fi connection when it arrives ---------------- */
     /* In its own task so it can never gate the services above. */
+    /* Internal-RAM stack: it starts mDNS, which persists its hostname to NVS. */
     xTaskCreate(wifi_status_task, "wifi_status", 3072, NULL, 3, NULL);
 
     while (1) {

@@ -10,7 +10,8 @@ Usage:
     tools/at_test.py --port /dev/cu.usbserial-0001 --manual
 
 The AT UART is independent of the log/console UART, so this runs while the
-application is up (see CONFIG_ESPX_AT_UART_*; default UART1, TX=GPIO4 RX=GPIO5).
+application is up (see CONFIG_ESPX_AT_UART_*; default UART1 on its own IO_MUX pins,
+TX=GPIO17 RX=GPIO18 -- the same pins a board is wired for).
 
 Exit code is non-zero when a check fails.
 """

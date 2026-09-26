@@ -40,6 +40,8 @@
 | **串口 AT 指令** | 参考 ESP-AT 的指令集与应答格式，宿主 MCU 可直接驱动 |
 | **产线测试模式** | 长按 BOOT 3 秒进入，交互式硬件自检 |
 | **工厂预置** | `mfg_data` 分区一次性写入：设备身份、网络、MQTT、外设绑定 |
+| **默认绑定** | 新设备开箱即把板载 WS2812（GPIO48）绑为设备 `led`，可网页/MQTT/AT 直接控制；只播种一次，删掉不会复活 |
+| **系统监控** | Dashboard 展示 CPU 负载、内部 RAM / PSRAM 占用（带压力变色条）与任务数 |
 
 ---
 
@@ -170,7 +172,7 @@ mosquitto_pub -h <broker> -t "$PREFIX/cmd/control/relay_a" -m '{"action":"set","
 mosquitto_pub -h <broker> -t "$PREFIX/cmd/query/temp_in"   -m '{"action":"get"}'
 ```
 
-串口 AT（默认 UART1，TX=GPIO4 / RX=GPIO5，115200）：
+串口 AT（默认 UART1，使用其 IO_MUX 默认引脚 TX=GPIO17 / RX=GPIO18，115200）：
 
 ```
 AT+GMR                  版本信息

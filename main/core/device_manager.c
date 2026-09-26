@@ -14,6 +14,7 @@
 #include <esp_log.h>
 #include <cJSON.h>
 
+#include "task_util.h"
 #include "device_manager.h"
 #include "device_type.h"
 #include "event_bus.h"
@@ -51,7 +52,7 @@ static void tick_task(void *arg)
     }
 
     g_tick_task = NULL;
-    vTaskDelete(NULL);
+    espx_task_delete_self();
 }
 
 /**
@@ -121,7 +122,7 @@ esp_err_t device_manager_init(void)
     memset(g_devices, 0, sizeof(g_devices));
 
     g_running = true;
-    xTaskCreate(tick_task, "dev_tick", 4096, NULL, 1, &g_tick_task);
+    espx_task_create(tick_task, "dev_tick", 4096, NULL, 1, &g_tick_task);
 
     ESP_LOGI(TAG, "Device manager initialized");
     return ESP_OK;

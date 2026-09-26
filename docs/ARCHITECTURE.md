@@ -221,8 +221,11 @@ the server's socket pool (`max_open_sockets`, default 7).
 
 ### 4.4 Serial AT commands
 
-UART1 by default (TX=GPIO4, RX=GPIO5, 115200) so the AT port and the
-log/manufacturing console (UART0) stay independent. Wire format and command set
+UART1 by default, on its own IO_MUX pins (TX=GPIO17, RX=GPIO18, 115200), so the
+AT port and the log/manufacturing console (UART0) stay independent. Routing UART1
+through the GPIO matrix to arbitrary pins is possible (`ESPX_AT_USE_DEFAULT_PINS=n`)
+but the IO_MUX pins are what a board is wired for; UART2 has no IO_MUX pins and
+requires explicit ones. Wire format and command set
 follow ESP-AT: CR+LF terminated, `\r\nOK\r\n` / `\r\nERROR\r\n`, queries as
 `\r\n+CMD:<value>\r\n`.
 
@@ -513,9 +516,11 @@ non-default settings.
 | Quantity | Value |
 |---|---|
 | Internal RAM (total) | **345 KB** — the pool that runs out |
-| Internal RAM free after boot | ~180 KB |
+| Internal RAM free after boot | **170 KB (51% used)** |
 | Internal RAM per TLS session | ~25 KB |
-| Lowest internal free under 4 concurrent requests | ~40 KB, recovers |
+| Lowest internal free under 16 concurrent requests | **~123 KB** |
+| Largest allocatable internal block | 88–92 KB |
+| PSRAM in use | ~1% (task stacks, Wi-Fi/LWIP buffers) |
 | TLS handshake, ECDSA P-256 @240 MHz | ~0.5 s |
 | Subsequent request on the same connection | 12–30 ms |
 | TLS handshake with RSA-2048 | ~1.5 s |
@@ -532,6 +537,14 @@ Three deliberate choices follow from this:
    RAM runs out the failure is not graceful: `mbedtls_ssl_setup` returns
    `PSA_ERROR_INSUFFICIENT_MEMORY` and the server refuses *every* subsequent
    connection until reboot.
+
+Besides those, internal RAM is reclaimed by moving Wi-Fi/LWIP buffers to PSRAM
+(`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`), moving the stacks of **flash-free**
+tasks to PSRAM (`core/task_util.h`), trimming Wi-Fi buffer counts and LwIP
+windows, and enabling `MBEDTLS_DYNAMIC_BUFFER`. Two constraints are easy to get
+wrong and are documented in `docs/DEVELOPMENT.md` §5: a task with a PSRAM stack
+must never perform a flash operation, and
+`MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` must not be enabled on a TLS **server**.
 
 `/api/system/info` and the WebSocket `state` message both report
 `ram.internal_free`, `ram.internal_min_free` (low-water mark) and `cpu.usage`.

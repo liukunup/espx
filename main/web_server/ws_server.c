@@ -14,6 +14,7 @@
 #include <esp_timer.h>
 #include <cJSON.h>
 
+#include "task_util.h"
 #include "app_info.h"
 #include "ws_server.h"
 #include "web_server.h"
@@ -474,7 +475,8 @@ esp_err_t ws_server_start(httpd_handle_t server)
     if (s_task == NULL) {
         s_running = true;
         s_dirty = true;
-        if (xTaskCreate(ws_task, "ws_push", 6144, NULL, 4, &s_task) != pdPASS) {
+        if (/* Internal-RAM stack: a config push over the socket writes NVS. See task_util.h. */
+        xTaskCreate(ws_task, "ws_push", 6144, NULL, 4, &s_task) != pdPASS) {
             s_running = false;
             ESP_LOGE(TAG, "failed to start the broadcast task");
             return ESP_FAIL;

@@ -151,7 +151,7 @@ def _enter(c):
 DEVICES = [
     ('ws_led', 'ws2812',       '{"data_gpio":48,"count":1}'),
     ('relay1', 'relay',        '{"gpio":5,"active_level":1}'),
-    ('sr1',    'shiftreg_595', '{"data_gpio":16,"clock_gpio":17,"latch_gpio":18,"count":2}'),
+    ('sr1',    'shiftreg_595', '{"data_gpio":16,"clock_gpio":15,"latch_gpio":7,"count":2}'),
     ('btn1',   'button',       '{"gpio":9,"active_level":0}'),
 ]
 

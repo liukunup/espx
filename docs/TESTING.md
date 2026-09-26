@@ -490,9 +490,18 @@ shows `poll` instead of `live`.
 
 **Proves:** a host MCU can commission and drive the node over UART.
 
-AT runs on **UART1** (TX=GPIO4, RX=GPIO5, 115200). Connect a USB-TTL adapter,
-or temporarily set `CONFIG_ESPX_AT_UART_NUM=0` to test over the console UART
-(logs will interleave).
+AT runs on **UART1**, on its own IO_MUX pins: **TX=GPIO17, RX=GPIO18, 115200**.
+Wire a USB-TTL adapter cross-over (ESP32 TX -> adapter RX, ESP32 RX -> adapter TX,
+GND common), then:
+
+```bash
+python3 tools/at_test.py --port /dev/cu.usbserial-XXXX      # 22 assertions
+python3 tools/at_test.py --port /dev/cu.usbserial-XXXX --manual
+```
+
+Alternatively set `CONFIG_ESPX_AT_UART_NUM=0` to test over the console UART; the
+firmware then leaves the console's pins alone and warns that log output will
+interleave with the AT replies.
 
 ```
 AT

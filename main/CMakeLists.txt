@@ -14,6 +14,7 @@ set(espx_sources
     "core/yaml.c"
     "core/config_apply.c"
     "core/sys_stats.c"
+    "core/defaults.c"
 
     # Serial AT interface
     "at_service/at_service.c"

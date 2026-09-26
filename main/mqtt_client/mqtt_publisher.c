@@ -16,6 +16,7 @@
 #include <esp_timer.h>
 #include <cJSON.h>
 
+#include "task_util.h"
 #include "mqtt_publisher.h"
 #include "espx_mqtt_client.h"
 #include "device_manager.h"
@@ -81,7 +82,7 @@ static void publisher_task(void *arg)
     }
 
     g_task = NULL;
-    vTaskDelete(NULL);
+    espx_task_delete_self();
 }
 
 esp_err_t mqtt_publisher_init(void)
@@ -97,7 +98,7 @@ esp_err_t mqtt_publisher_start(void)
     }
 
     g_running = true;
-    xTaskCreate(publisher_task, "mqtt_pub", 4096, NULL, 1, &g_task);
+    espx_task_create(publisher_task, "mqtt_pub", 4096, NULL, 1, &g_task);
     return ESP_OK;
 }
 

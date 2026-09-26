@@ -43,6 +43,8 @@ The binding statement of intent lives in [AGENT.md](AGENT.md).
 | **Serial AT commands** | ESP-AT style command set so a host MCU can drive the node |
 | **Manufacturing test mode** | Hold BOOT for 3 s; interactive hardware self-test |
 | **Factory provisioning** | One-shot `mfg_data` partition: identity, network, MQTT, peripheral bindings |
+| **Default binding** | A fresh node binds its on-board WS2812 (GPIO48) as device `led`, controllable from the UI/MQTT/AT; seeded exactly once, so deleting it sticks |
+| **System monitoring** | Dashboard shows CPU load, internal RAM / PSRAM usage (pressure-coloured bars) and task count |
 
 ---
 
@@ -164,7 +166,7 @@ mosquitto_pub -h <broker> -t "$PREFIX/cmd/control/relay_a" -m '{"action":"set","
 mosquitto_pub -h <broker> -t "$PREFIX/cmd/query/temp_in"   -m '{"action":"get"}'
 ```
 
-Serial AT (UART1, TX=GPIO4, RX=GPIO5, 115200):
+Serial AT (UART1, TX=GPIO17, RX=GPIO18, 115200):
 
 ```
 AT+GMR                  version information

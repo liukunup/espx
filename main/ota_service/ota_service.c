@@ -29,6 +29,7 @@
 #include <cJSON.h>
 
 #if __has_include("esp_crt_bundle.h")
+#include "task_util.h"
 #include "esp_crt_bundle.h"
 #define ESPX_HAVE_CRT_BUNDLE 1
 #else
@@ -436,6 +437,8 @@ esp_err_t ota_service_start(const char *url)
         return ESP_ERR_NO_MEM;
     }
 
+    /* Internal-RAM stack: esp_ota_write() performs flash writes, which disable
+     * the cache and with it PSRAM access. See task_util.h. */
     if (xTaskCreate(ota_task, "ota_task", 8192, url_copy, 5, &s_task) != pdPASS) {
         free(url_copy);
         s_running = false;

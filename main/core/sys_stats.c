@@ -13,6 +13,7 @@
 #include <esp_heap_caps.h>
 #include <esp_chip_info.h>
 
+#include "task_util.h"
 #include "sys_stats.h"
 
 static const char *TAG = "sys_stats";
@@ -126,7 +127,7 @@ esp_err_t sys_stats_start(void)
     /* Publish a first snapshot synchronously so an early request is not empty. */
     collect();
 
-    if (xTaskCreate(sys_stats_task, "sys_stats", 3072, NULL, 1, &s_task) != pdPASS) {
+    if (espx_task_create(sys_stats_task, "sys_stats", 3072, NULL, 1, &s_task) != pdPASS) {
         ESP_LOGE(TAG, "failed to start the sampler task");
         return ESP_FAIL;
     }

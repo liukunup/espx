@@ -85,6 +85,41 @@ menu "ESPX Configuration"
     endchoice
 
     # =====================================================================
+    # Default configuration seeded on a fresh node
+    # =====================================================================
+
+    config ESPX_DEFAULT_WS2812
+        bool "Bind the on-board WS2812 as a device on first boot"
+        default y
+        depends on ESPX
+        help
+            A node with nothing bound cannot be told apart from a broken one, so
+            a fresh unit gets its on-board RGB LED bound as a controllable
+            device. It then shows up like any other device: in the Web UI, over
+            MQTT, AT and the WebSocket, and it can be deleted if unwanted.
+
+            Seeded exactly once (guarded by an NVS flag), so deleting it sticks.
+            Factory data providing devices takes precedence.
+
+    config ESPX_DEFAULT_WS2812_ID
+        string "Default WS2812 device id"
+        default "led"
+        depends on ESPX_DEFAULT_WS2812
+
+    config ESPX_DEFAULT_WS2812_GPIO
+        int "Default WS2812 data GPIO"
+        default 48
+        depends on ESPX_DEFAULT_WS2812
+        help
+            GPIO48 carries the on-board addressable RGB LED on the ESP32-S3
+            R16N8 module.
+
+    config ESPX_DEFAULT_WS2812_COUNT
+        int "Default WS2812 pixel count"
+        default 1
+        depends on ESPX_DEFAULT_WS2812
+
+    # =====================================================================
     # Serial AT interface
     # =====================================================================
 
@@ -113,18 +148,37 @@ menu "ESPX Configuration"
             Choosing 0 shares the port with the log output and the test-mode
             console, where the two will interleave.
 
-    config ESPX_AT_UART_TX_GPIO
-        int "AT UART TX GPIO"
-        default 4
+    config ESPX_AT_USE_DEFAULT_PINS
+        bool "Use the UART's default IO_MUX pins"
+        default y
         depends on ESPX_AT_ENABLE
         help
+            Let the UART use its IO_MUX pins instead of routing the signals
+            through the GPIO matrix to arbitrary pins. That is what a host
+            wiring a board expects.
+
+            ESP32-S3 defaults:
+              UART0  TX=GPIO43  RX=GPIO44
+              UART1  TX=GPIO17  RX=GPIO18
+              UART2  none -- IO_MUX2 does not exist, so UART2 requires
+                     explicit pins (disable this option).
+
+            Disable to route to specific pins (needed for UART2, or when the
+            default pins are already taken by something else).
+
+    config ESPX_AT_UART_TX_GPIO
+        int "AT UART TX GPIO"
+        default 17
+        depends on ESPX_AT_ENABLE && !ESPX_AT_USE_DEFAULT_PINS
+        help
             ESP32-S3: avoid the strapping pins (0/3/45/46), the flash pins
-            (26-32), the octal PSRAM pins (33-37) and the USB pins (19/20).
+            (26-32), the octal PSRAM pins (33-37), the USB pins (19/20) and the
+            console pins (43/44). GPIO17/18 are UART1's own IO_MUX pins.
 
     config ESPX_AT_UART_RX_GPIO
         int "AT UART RX GPIO"
-        default 5
-        depends on ESPX_AT_ENABLE
+        default 18
+        depends on ESPX_AT_ENABLE && !ESPX_AT_USE_DEFAULT_PINS
 
     config ESPX_AT_UART_BAUD
         int "AT UART baud rate"
