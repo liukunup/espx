@@ -4,6 +4,7 @@ set(src_dirs
     wifi_prov
     param_store
     cert_manager
+    web_server
 )
 
 set(include_dirs
@@ -12,14 +13,18 @@ set(include_dirs
     wifi_prov
     param_store
     cert_manager
+    web_server
 )
 
 set(requires
-    freertos esp_timer
+    freertos
+    esp_timer
     nvs_flash
     esp_mac
     cjson
     mbedtls
+    esp_https_server
+    wifi_proving
 )
 
 idf_component_register(
