@@ -19,6 +19,7 @@
 #include <nvs_flash.h>
 
 #include <network_provisioning/manager.h>
+#include <cJSON.h>
 #include <network_provisioning/scheme_softap.h>
 #if WIFI_PROV_TRANSPORT == WIFI_PROV_TRANSPORT_BLE
 #include <network_provisioning/scheme_ble.h>
@@ -26,6 +27,7 @@
 
 #include "qrcode.h"
 #include "wifi_prov.h"
+#include "node_config.h"
 
 static const char *TAG = "wifi_prov";
 
@@ -241,6 +243,62 @@ static esp_err_t custom_prov_data_handler(uint32_t session_id, const uint8_t *in
     return ESP_OK;
 }
 
+/**
+ * @brief Connect using credentials pre-provisioned by factory data
+ *
+ * A factory-programmed unit should come up on the plant network without an
+ * operator running SoftAP provisioning. If node_config carries
+ * network.wifi_ssid (and password), configure the station directly.
+ *
+ * @return true when credentials were found and the station was started
+ */
+static bool start_with_preconfigured_credentials(void)
+{
+    char ssid[33] = {0};
+    char password[65] = {0};
+
+    cJSON *cfg = node_config_get();
+    if (cfg == NULL) {
+        return false;
+    }
+
+    cJSON *net = cJSON_GetObjectItem(cfg, "network");
+    if (cJSON_IsObject(net)) {
+        cJSON *v = cJSON_GetObjectItem(net, "wifi_ssid");
+        if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
+            strncpy(ssid, v->valuestring, sizeof(ssid) - 1);
+        }
+        v = cJSON_GetObjectItem(net, "wifi_password");
+        if (cJSON_IsString(v)) {
+            strncpy(password, v->valuestring, sizeof(password) - 1);
+        }
+    }
+    cJSON_Delete(cfg);
+
+    if (ssid[0] == '\0') {
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Using pre-provisioned Wi-Fi credentials for SSID '%s'", ssid);
+
+    wifi_config_t wc = {0};
+    strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
+    if (password[0] != '\0') {
+        strncpy((char *)wc.sta.password, password, sizeof(wc.sta.password) - 1);
+        wc.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+        wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                &prov_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    return true;
+}
+
 /* ============================================
  * Public API
  * ============================================ */
@@ -315,6 +373,13 @@ esp_err_t wifi_prov_start(wifi_prov_event_handler_t *event_handler)
     bool provisioned = false;
     ESP_ERROR_CHECK(network_prov_mgr_is_wifi_provisioned(&provisioned));
     s_provisioned = provisioned;
+
+    /* Factory-programmed credentials take precedence over interactive
+     * provisioning: no operator needed on the production line. */
+    if (!provisioned && start_with_preconfigured_credentials()) {
+        network_prov_mgr_deinit();
+        return ESP_OK;
+    }
 
     if (!provisioned) {
         ESP_LOGI(TAG, "Starting provisioning");
@@ -409,8 +474,24 @@ void wifi_prov_deinit(void)
 void wifi_prov_reset(void)
 {
     ESP_LOGW(TAG, "Resetting provisioning state");
-    ESP_ERROR_CHECK(network_prov_mgr_reset_wifi_provisioning());
-    ESP_ERROR_CHECK(network_prov_mgr_reset_wifi_sm_state_for_reprovision());
+
+    /* The provisioning manager is de-initialised once provisioning ends, so
+     * these calls only make sense while it is still alive. */
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "Cannot reset: provisioning not initialized");
+        return;
+    }
+
+    esp_err_t err = network_prov_mgr_reset_wifi_provisioning();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "reset_wifi_provisioning failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = network_prov_mgr_reset_wifi_sm_state_for_reprovision();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "reset state machine failed: %s", esp_err_to_name(err));
+    }
 }
 
 bool wifi_prov_is_provisioned(void)

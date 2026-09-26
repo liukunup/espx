@@ -97,13 +97,19 @@ static void apply_node_section(cJSON *node)
         }
 
         const char *net_keys[] = {
-            "mqtt_broker", "mqtt_username", "mqtt_password", "mqtt_topic_prefix"
+            "mqtt_broker", "mqtt_username", "mqtt_password", "mqtt_topic_prefix",
+            "wifi_ssid", "wifi_password",
         };
         for (size_t i = 0; i < sizeof(net_keys) / sizeof(net_keys[0]); i++) {
             cJSON *v = cJSON_GetObjectItem(network, net_keys[i]);
             if (cJSON_IsString(v)) {
                 cJSON_ReplaceItemInObject(cur_net, net_keys[i], cJSON_CreateString(v->valuestring));
-                ESP_LOGI(TAG, "  network.%s = %s", net_keys[i], v->valuestring);
+                /* Never log credentials */
+                if (strstr(net_keys[i], "password") != NULL) {
+                    ESP_LOGI(TAG, "  network.%s = <set>", net_keys[i]);
+                } else {
+                    ESP_LOGI(TAG, "  network.%s = %s", net_keys[i], v->valuestring);
+                }
             }
         }
     }

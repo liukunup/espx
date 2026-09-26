@@ -1,6 +1,10 @@
 /**
  * @file ota_service.h
- * @brief OTA Service for ESPX device
+ * @brief Delta OTA service (compressed delta firmware update)
+ *
+ * Downloads a detools-format patch from an HTTP(S) URL, applies it against
+ * the currently running firmware, writes the result to the next OTA
+ * partition and reboots.
  */
 
 #ifndef OTA_SERVICE_H
@@ -14,79 +18,72 @@
 extern "C" {
 #endif
 
-/**
- * @brief OTA state
- */
 typedef enum {
-    OTA_STATE_IDLE,
-    OTA_STATE_CHECKING,
+    OTA_STATE_IDLE = 0,
+    OTA_STATE_CONNECTING,
     OTA_STATE_DOWNLOADING,
     OTA_STATE_VERIFYING,
     OTA_STATE_APPLYING,
     OTA_STATE_REBOOTING,
-    OTA_STATE_FAILED,
     OTA_STATE_SUCCESS,
+    OTA_STATE_FAILED,
 } ota_state_t;
 
-/**
- * @brief OTA status
- */
 typedef struct {
     ota_state_t state;
-    float progress;
-    char version[32];
-    char error_msg[128];
+    int progress;           /**< 0-100 */
+    int bytes_read;         /**< patch bytes received */
+    int total_size;         /**< patch size, -1 if unknown */
+    char url[256];
+    char error[128];
+    char running_version[32];
 } ota_status_t;
 
-/**
- * @brief OTA event callback
- */
-typedef void (*ota_event_cb_t)(ota_state_t state, float progress, void *user_data);
+/** Progress callback (called from OTA task) */
+typedef void (*ota_progress_cb_t)(const ota_status_t *status, void *user_data);
 
 /**
  * @brief Initialize OTA service
- *
- * @return ESP_OK on success, error code on failure
  */
 esp_err_t ota_service_init(void);
 
 /**
- * @brief Check for OTA updates
+ * @brief Start a delta OTA update from a patch URL
  *
- * @return ESP_OK if update available, ESP_FAIL if no update, error code on failure
- */
-esp_err_t ota_service_check(void);
-
-/**
- * @brief Start OTA update from URL
+ * Runs in the background. On success the device reboots into the new
+ * firmware; the previous slot remains as fallback.
  *
- * @param url OTA manifest URL or direct binary URL
- * @return ESP_OK on success, error code on failure
+ * @param url  HTTP(S) URL of the .patch file
+ * @return ESP_OK if the update task started
  */
 esp_err_t ota_service_start(const char *url);
 
 /**
- * @brief Cancel ongoing OTA update
- *
- * @return ESP_OK on success, error code on failure
+ * @brief Cancel an in-progress update (best effort)
  */
 esp_err_t ota_service_cancel(void);
 
 /**
- * @brief Get OTA status
- *
- * @param status Output status structure
- * @return ESP_OK on success, error code on failure
+ * @brief Get current OTA status
  */
 esp_err_t ota_service_get_status(ota_status_t *status);
 
 /**
- * @brief Set OTA event callback
- *
- * @param cb Callback function
- * @param user_data User data passed to callback
+ * @brief Check whether an update is currently running
  */
-void ota_service_set_callback(ota_event_cb_t cb, void *user_data);
+bool ota_service_is_running(void);
+
+/**
+ * @brief Register a progress callback
+ */
+void ota_service_set_progress_cb(ota_progress_cb_t cb, void *user_data);
+
+/**
+ * @brief Confirm the running firmware is good (cancels rollback)
+ *
+ * Call after a successful boot to mark the new firmware as valid.
+ */
+esp_err_t ota_service_mark_valid(void);
 
 #ifdef __cplusplus
 }

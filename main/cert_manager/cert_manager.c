@@ -1,10 +1,14 @@
 /**
  * @file cert_manager.c
- * @brief Certificate manager using embedded self-signed certificate
+ * @brief Certificate manager
  *
- * The certificate is embedded at build time (espx_cert.h), generated with:
- *   openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
- *     -days 3650 -nodes -subj "/CN=espx.local/O=ESPX/C=CN"
+ * The server certificate and private key are plain PEM files in
+ *   main/cert_manager/certs/server.crt
+ *   main/cert_manager/certs/server.key
+ * and are embedded into the firmware at build time by CMake EMBED_FILES
+ * (see main/CMakeLists.txt). Regenerate with: tools/gen_certs.sh
+ *
+ * Replacing the certificate therefore requires editing files, not C source.
  */
 
 #include <stdio.h>
@@ -15,12 +19,19 @@
 #include <esp_mac.h>
 
 #include "cert_manager.h"
-#include "espx_cert.h"
 
 static const char *TAG = "cert_manager";
 
+/* Embedded at build time (EMBED_FILES adds a trailing NUL) */
+extern const uint8_t server_crt_start[] asm("_binary_server_crt_start");
+extern const uint8_t server_crt_end[]   asm("_binary_server_crt_end");
+extern const uint8_t server_key_start[] asm("_binary_server_key_start");
+extern const uint8_t server_key_end[]   asm("_binary_server_key_end");
+
 static bool g_initialized = false;
 static char g_device_san[64] = {0};
+static size_t g_cert_len = 0;
+static size_t g_key_len = 0;
 
 esp_err_t cert_manager_init(void)
 {
@@ -29,9 +40,32 @@ esp_err_t cert_manager_init(void)
     snprintf(g_device_san, sizeof(g_device_san), "espx-%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
+    /* EMBED_FILES appends a NUL; exclude it from the length. */
+    g_cert_len = (size_t)(server_crt_end - server_crt_start);
+    g_key_len  = (size_t)(server_key_end - server_key_start);
+    if (g_cert_len > 0 && server_crt_start[g_cert_len - 1] == '\0') g_cert_len--;
+    if (g_key_len  > 0 && server_key_start[g_key_len - 1]  == '\0') g_key_len--;
+
+    if (g_cert_len == 0 || g_key_len == 0) {
+        ESP_LOGE(TAG, "Embedded certificate or key is empty");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Sanity check: PEM markers present */
+    if (strstr((const char *)server_crt_start, "BEGIN CERTIFICATE") == NULL) {
+        ESP_LOGE(TAG, "server.crt does not look like a PEM certificate");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (strstr((const char *)server_key_start, "PRIVATE KEY") == NULL) {
+        ESP_LOGE(TAG, "server.key does not look like a PEM private key");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     g_initialized = true;
-    ESP_LOGI(TAG, "Cert manager initialized, device: %s", g_device_san);
-    ESP_LOGI(TAG, "Using embedded self-signed certificate");
+
+    ESP_LOGI(TAG, "Certificate loaded from build-time files (%u / %u bytes)",
+             (unsigned)g_cert_len, (unsigned)g_key_len);
+    ESP_LOGI(TAG, "Device: %s (certificate CN is independent of this)", g_device_san);
     return ESP_OK;
 }
 
@@ -41,23 +75,29 @@ esp_err_t cert_manager_get_server_cert(server_cert_t *cert)
         return ESP_ERR_INVALID_STATE;
     }
 
-    cert->cert_pem = strdup(ESPX_SERVER_CERT_PEM);
-    cert->key_pem = strdup(ESPX_SERVER_KEY_PEM);
-
+    /* Copy so the caller can free uniformly; PEM data needs a NUL terminator. */
+    cert->cert_pem = malloc(g_cert_len + 1);
+    cert->key_pem  = malloc(g_key_len + 1);
     if (cert->cert_pem == NULL || cert->key_pem == NULL) {
         cert_manager_free_cert(cert);
         return ESP_ERR_NO_MEM;
     }
 
-    cert->cert_len = strlen(cert->cert_pem);
-    cert->key_len = strlen(cert->key_pem);
+    memcpy(cert->cert_pem, server_crt_start, g_cert_len);
+    cert->cert_pem[g_cert_len] = '\0';
+    memcpy(cert->key_pem, server_key_start, g_key_len);
+    cert->key_pem[g_key_len] = '\0';
+
+    cert->cert_len = g_cert_len;
+    cert->key_len  = g_key_len;
 
     return ESP_OK;
 }
 
 esp_err_t cert_manager_regenerate(void)
 {
-    ESP_LOGW(TAG, "Regenerate not supported with embedded certificate");
+    ESP_LOGW(TAG, "Certificate is baked into the firmware at build time;");
+    ESP_LOGW(TAG, "run tools/gen_certs.sh and rebuild the project instead.");
     return ESP_ERR_NOT_SUPPORTED;
 }
 
@@ -68,9 +108,17 @@ bool cert_manager_is_valid(void)
 
 esp_err_t cert_manager_get_info(char *info, size_t max_len)
 {
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     snprintf(info, max_len,
-             "{\"valid\":%s,\"device\":\"%s\",\"algorithm\":\"RSA-2048\",\"source\":\"embedded\"}",
-             g_initialized ? "true" : "false", g_device_san);
+             "{\"valid\":%s,\"device\":\"%s\",\"algorithm\":\"RSA-2048\","
+             "\"source\":\"build-time PEM files\","
+             "\"cert_bytes\":%u,\"key_bytes\":%u}",
+             g_initialized ? "true" : "false", g_device_san,
+             (unsigned)g_cert_len, (unsigned)g_key_len);
+
     return ESP_OK;
 }
 

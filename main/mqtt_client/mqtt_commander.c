@@ -24,6 +24,8 @@
 #include "device_manager.h"
 #include "device_type.h"
 #include "node_config.h"
+#include "ota_service/ota_service.h"
+#include "test_mode/test_mode.h"
 
 static const char *TAG = "mqtt_commander";
 
@@ -152,6 +154,61 @@ static void handle_control(const char *device_id, cJSON *data)
 }
 
 /**
+ * @brief Handle OTA command
+ *
+ * {"action":"start","url":"http://host/espx.patch"}
+ * {"action":"status"}
+ * {"action":"cancel"}
+ */
+static void handle_ota(cJSON *data)
+{
+    cJSON *action = cJSON_GetObjectItem(data, "action");
+    const char *act = cJSON_IsString(action) ? action->valuestring : "status";
+
+    if (strcmp(act, "start") == 0) {
+        cJSON *url = cJSON_GetObjectItem(data, "url");
+        if (!cJSON_IsString(url) || url->valuestring[0] == '\0') {
+            const char *e = "{\"error\":\"missing url\"}";
+            mqtt_client_publish("ota/status", e, strlen(e), 1, false);
+            return;
+        }
+
+        esp_err_t err = ota_service_start(url->valuestring);
+        char resp[192];
+        snprintf(resp, sizeof(resp), "{\"started\":%s,\"error\":\"%s\"}",
+                 err == ESP_OK ? "true" : "false",
+                 err == ESP_OK ? "" : esp_err_to_name(err));
+        mqtt_client_publish("ota/status", resp, strlen(resp), 1, false);
+
+    } else if (strcmp(act, "cancel") == 0) {
+        ota_service_cancel();
+        const char *c = "{\"cancelled\":true}";
+        mqtt_client_publish("ota/status", c, strlen(c), 1, false);
+
+    } else {
+        ota_status_t st;
+        ota_service_get_status(&st);
+
+        static const char *names[] = {
+            "IDLE", "CONNECTING", "DOWNLOADING", "VERIFYING",
+            "APPLYING", "REBOOTING", "SUCCESS", "FAILED"
+        };
+
+        cJSON *out = cJSON_CreateObject();
+        cJSON_AddStringToObject(out, "state",
+                                names[st.state <= OTA_STATE_FAILED ? st.state : OTA_STATE_FAILED]);
+        cJSON_AddNumberToObject(out, "progress", st.progress);
+        cJSON_AddStringToObject(out, "running_version", st.running_version);
+        char *s = cJSON_PrintUnformatted(out);
+        if (s) {
+            mqtt_client_publish("ota/status", s, strlen(s), 1, false);
+            free(s);
+        }
+        cJSON_Delete(out);
+    }
+}
+
+/**
  * @brief Handle config command
  */
 static void handle_config(cJSON *data)
@@ -171,19 +228,20 @@ static void handle_config(cJSON *data)
         }
         cJSON_Delete(array);
     } else if (strcmp(action->valuestring, "get_device_types") == 0) {
-        size_t count;
-        const device_type_t *types = device_type_get_all(&count);
-
         cJSON *array = cJSON_CreateArray();
-        for (size_t i = 0; i < count; i++) {
+
+        for (size_t i = 0; i < device_type_count(); i++) {
+            const device_type_t *t = device_type_get_by_index(i);
+            if (t == NULL) continue;
+
             cJSON *item = cJSON_CreateObject();
-            cJSON_AddStringToObject(item, "name", types[i].name);
-            cJSON_AddStringToObject(item, "description", types[i].description);
-            cJSON_AddNumberToObject(item, "capabilities", types[i].capabilities);
+            cJSON_AddStringToObject(item, "name", t->name);
+            cJSON_AddStringToObject(item, "description", t->description);
+            cJSON_AddNumberToObject(item, "capabilities", t->capabilities);
 
             cJSON *default_config = cJSON_CreateObject();
-            if (types[i].get_default_config) {
-                types[i].get_default_config(default_config);
+            if (t->get_default_config) {
+                t->get_default_config(default_config);
             }
             cJSON_AddItemToObject(item, "default_config", default_config);
 
@@ -199,6 +257,11 @@ static void handle_config(cJSON *data)
     } else if (strcmp(action->valuestring, "reboot") == 0) {
         // Reboot device
         ESP_LOGI(TAG, "Reboot requested via MQTT");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    } else if (strcmp(action->valuestring, "testmode") == 0) {
+        ESP_LOGW(TAG, "Test mode requested via MQTT");
+        test_mode_request();
         vTaskDelay(pdMS_TO_TICKS(200));
         esp_restart();
     }
@@ -250,6 +313,8 @@ void mqtt_commander_handle(const char *topic, const char *payload, int payload_l
         }
     } else if (topic_matches_cmd(topic, "config")) {
         handle_config(data);
+    } else if (topic_matches_cmd(topic, "ota")) {
+        handle_ota(data);
     } else if (topic_matches_cmd(topic, "reboot")) {
         handle_reboot(data);
     } else {

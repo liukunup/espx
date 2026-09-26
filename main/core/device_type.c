@@ -61,10 +61,15 @@ const device_type_t* device_type_get(const char *name)
     return NULL;
 }
 
-const device_type_t* device_type_get_all(size_t *count)
+size_t device_type_count(void)
 {
-    if (count != NULL) {
-        *count = g_type_count;
+    return g_type_count;
+}
+
+const device_type_t* device_type_get_by_index(size_t index)
+{
+    if (index >= g_type_count) {
+        return NULL;
     }
-    return g_types[0];
+    return g_types[index];
 }

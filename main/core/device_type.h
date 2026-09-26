@@ -92,12 +92,17 @@ esp_err_t device_type_register(const device_type_t *type);
 const device_type_t* device_type_get(const char *name);
 
 /**
- * @brief Get all registered device types
- *
- * @param count Output: number of types
- * @return Pointer to array of types (internal storage)
+ * @brief Get number of registered device types
  */
-const device_type_t* device_type_get_all(size_t *count);
+size_t device_type_count(void);
+
+/**
+ * @brief Get a registered device type by index
+ *
+ * @param index 0 .. device_type_count()-1
+ * @return Type pointer, or NULL if out of range
+ */
+const device_type_t* device_type_get_by_index(size_t index);
 
 /**
  * @brief Initialize device type registry

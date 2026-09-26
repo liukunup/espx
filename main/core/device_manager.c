@@ -174,8 +174,13 @@ esp_err_t device_manager_load(void)
 
             if (!cJSON_IsString(id) || !cJSON_IsString(type)) continue;
 
-            esp_err_t add_err = device_add(id->valuestring, type->valuestring, config);
-            if (add_err == ESP_OK && enabled && !cJSON_IsTrue(enabled)) {
+            if (device_add(id->valuestring, type->valuestring, config) != ESP_OK) {
+                continue;
+            }
+
+            /* Only disable when the field is explicitly present and false;
+             * a missing "enabled" key means enabled. */
+            if (enabled != NULL && cJSON_IsBool(enabled) && !cJSON_IsTrue(enabled)) {
                 device_set_enabled(id->valuestring, false);
             }
         }
@@ -389,12 +394,12 @@ struct device* device_get(const char *id)
     return g_devices[idx];
 }
 
-const struct device* device_get_all(size_t *count)
+const struct device* device_get_by_index(size_t index)
 {
-    if (count != NULL) {
-        *count = g_device_count;
+    if (index >= g_device_count) {
+        return NULL;
     }
-    return g_devices[0];
+    return g_devices[index];
 }
 
 size_t device_get_count(void)

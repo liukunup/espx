@@ -37,6 +37,9 @@ set(espx_sources
 
     # Manufacturing provisioning
     "mfg_provision/mfg_provision.c"
+
+    # Delta OTA
+    "ota_service/ota_service.c"
 )
 
 set(espx_include_dirs
@@ -49,24 +52,30 @@ set(espx_include_dirs
     "wifi_prov"
     "test_mode"
     "mfg_provision"
+    "ota_service"
 )
 
 idf_component_register(
     SRCS ${espx_sources}
     INCLUDE_DIRS ${espx_include_dirs}
-    REQUIRES mqtt network_provisioning
+    EMBED_FILES
+        "web_server/web_files/index.html"
+        "cert_manager/certs/server.crt"
+        "cert_manager/certs/server.key"
+    REQUIRES mqtt network_provisioning esp_delta_ota
     PRIV_REQUIRES
         nvs_flash
         esp_netif
         esp_wifi
         esp_https_server
-        esp_https_ota
+        esp_http_client
+        app_update
+        esp_app_format
         esp_event
         esp_timer
         protocomm
         qrcode
         driver
-        app_update
         led_driver
         led_strip
         cjson

@@ -43,13 +43,41 @@ typedef struct {
 
 static esp_err_t apply_pixels(ws2812_data_t *data)
 {
+    /* Scale by brightness (0-255) so the configured value actually applies. */
+    const uint32_t b = (uint32_t)data->brightness;
+
     for (int i = 0; i < data->count; i++) {
-        led_strip_set_pixel(data->strip, i,
-                            data->r_buf[i],
-                            data->g_buf[i],
-                            data->b_buf[i]);
+        uint32_t r = (uint32_t)data->r_buf[i] * b / 255u;
+        uint32_t g = (uint32_t)data->g_buf[i] * b / 255u;
+        uint32_t bl = (uint32_t)data->b_buf[i] * b / 255u;
+        led_strip_set_pixel(data->strip, i, r, g, bl);
     }
     return led_strip_refresh(data->strip);
+}
+
+/**
+ * @brief Reject impossible GPIO numbers before touching the peripheral
+ */
+static esp_err_t ws2812_validate_config(const cJSON *config)
+{
+    if (!cJSON_IsObject(config)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *gpio = cJSON_GetObjectItem(config, "data_gpio");
+    if (!cJSON_IsNumber(gpio)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (gpio->valueint < 0 || gpio->valueint > 48) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *count = cJSON_GetObjectItem(config, "count");
+    if (cJSON_IsNumber(count) && (count->valueint < 1 || count->valueint > 300)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t ws2812_init(device_t *dev, const cJSON *config)
@@ -235,6 +263,7 @@ static const device_type_t ws2812_driver = {
     .read = ws2812_read,
     .write = ws2812_write,
     .get_default_config = ws2812_default_config,
+    .validate_config = ws2812_validate_config,
 };
 
 esp_err_t ws2812_driver_register(void)

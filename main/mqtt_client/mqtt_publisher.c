@@ -54,16 +54,13 @@ static void publisher_task(void *arg)
             if (mqtt_client_is_connected()) {
                 cJSON *sensors = cJSON_CreateObject();
 
-                size_t count;
-                const device_t *devices = device_get_all(&count);
-
-                for (size_t i = 0; i < count; i++) {
-                    const device_t *dev = &devices[i];
-                    if (!dev->enabled || !dev->initialized) continue;
+                for (size_t i = 0; i < device_get_count(); i++) {
+                    const device_t *dev = device_get_by_index(i);
+                    if (dev == NULL || !dev->enabled || !dev->initialized) continue;
                     if (!(dev->type->capabilities & DEVICE_CAPABILITY_PERIODIC)) continue;
 
                     cJSON *value = cJSON_CreateObject();
-                    if (dev->type->read && dev->type->read((device_t*)dev, value) == ESP_OK) {
+                    if (dev->type->read && dev->type->read((device_t *)dev, value) == ESP_OK) {
                         cJSON_AddItemToObject(sensors, dev->id, value);
                     } else {
                         cJSON_Delete(value);

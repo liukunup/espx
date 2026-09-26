@@ -1,6 +1,10 @@
 /**
  * @file button.c
- * @brief Button input driver
+ * @brief GPIO button input driver
+ *
+ * State is polled from the device-manager tick (100 ms). No ISR is used: an
+ * ISR would have to be IRAM-safe, and `esp_timer_get_time()` is not, so a
+ * polling debounce is both simpler and safer.
  */
 
 #include <stdio.h>
@@ -20,30 +24,21 @@
 
 static const char *TAG = "button";
 
+#define BUTTON_DEBOUNCE_MS 50
+
 typedef struct {
     int gpio;
     int active_level;
     bool pullup;
-    bool current_state;
-    int64_t last_change;
-    int64_t last_publish;
-    bool last_pressed;  // for press events
+    bool stable_pressed;    /**< debounced state */
+    bool last_raw;          /**< last raw sample */
+    int stable_ms;          /**< how long the raw sample has been unchanged */
 } button_data_t;
-
-static bool button_isr_service_installed = false;
-
-static void IRAM_ATTR button_isr_handler(void *arg)
-{
-    // ISR - just note the change; actual debounce in tick
-    device_t *dev = (device_t*)arg;
-    button_data_t *data = (button_data_t*)dev->driver_data;
-    if (data == NULL) return;
-    data->last_change = esp_timer_get_time();
-}
 
 static esp_err_t button_init(device_t *dev, const cJSON *config)
 {
     if (!cJSON_IsObject(config)) {
+        ESP_LOGE(TAG, "Missing config for '%s'", dev->id);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -52,6 +47,7 @@ static esp_err_t button_init(device_t *dev, const cJSON *config)
     cJSON *pullup = cJSON_GetObjectItem(config, "pullup");
 
     if (!cJSON_IsNumber(gpio_node)) {
+        ESP_LOGE(TAG, "Missing 'gpio' for '%s'", dev->id);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -62,76 +58,76 @@ static esp_err_t button_init(device_t *dev, const cJSON *config)
 
     data->gpio = gpio_node->valueint;
     data->active_level = cJSON_IsNumber(active) ? active->valueint : 0;
-    data->pullup = !cJSON_IsFalse(pullup);
-    data->current_state = false;
-    data->last_change = esp_timer_get_time();
-    data->last_publish = 0;
-    data->last_pressed = false;
+    data->pullup = cJSON_IsBool(pullup) ? cJSON_IsTrue(pullup) : true;
 
     gpio_config_t io = {
         .pin_bit_mask = (1ULL << data->gpio),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = data->pullup ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = data->pullup ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_ANYEDGE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
-    gpio_config(&io);
-
-    if (!button_isr_service_installed) {
-        gpio_install_isr_service(0);
-        button_isr_service_installed = true;
+    esp_err_t err = gpio_config(&io);
+    if (err != ESP_OK) {
+        free(data);
+        return err;
     }
-    gpio_isr_handler_add(data->gpio, button_isr_handler, dev);
+
+    data->last_raw = (gpio_get_level(data->gpio) == data->active_level);
+    data->stable_pressed = data->last_raw;
 
     dev->driver_data = data;
-    ESP_LOGI(TAG, "Button initialized on GPIO %d (active=%d)", data->gpio, data->active_level);
+    ESP_LOGI(TAG, "Button '%s' on GPIO%d (active=%d, pullup=%d)",
+             dev->id, data->gpio, data->active_level, data->pullup);
 
     return ESP_OK;
 }
 
 static esp_err_t button_deinit(device_t *dev)
 {
-    button_data_t *data = (button_data_t*)dev->driver_data;
-    if (data == NULL) return ESP_OK;
-
-    gpio_isr_handler_remove(data->gpio);
-    free(data);
-    dev->driver_data = NULL;
+    if (dev->driver_data) {
+        free(dev->driver_data);
+        dev->driver_data = NULL;
+    }
     return ESP_OK;
 }
 
 static esp_err_t button_read(device_t *dev, cJSON *value)
 {
-    button_data_t *data = (button_data_t*)dev->driver_data;
+    button_data_t *data = (button_data_t *)dev->driver_data;
     if (data == NULL) return ESP_ERR_INVALID_STATE;
 
-    bool pressed = (gpio_get_level(data->gpio) == data->active_level);
-    cJSON_AddBoolToObject(value, "pressed", pressed);
-
+    cJSON_AddBoolToObject(value, "pressed", data->stable_pressed);
     return ESP_OK;
 }
 
 static esp_err_t button_tick(device_t *dev)
 {
-    button_data_t *data = (button_data_t*)dev->driver_data;
+    button_data_t *data = (button_data_t *)dev->driver_data;
     if (data == NULL) return ESP_OK;
 
-    int64_t now = esp_timer_get_time();
-    int64_t debounce_ms = 50 * 1000;
+    bool raw = (gpio_get_level(data->gpio) == data->active_level);
 
-    // Debounce
-    if (now - data->last_change < debounce_ms) {
-        return ESP_OK;
+    if (raw != data->last_raw) {
+        data->last_raw = raw;
+        data->stable_ms = 0;
+        return ESP_OK;                 /* still bouncing */
     }
 
-    bool pressed = (gpio_get_level(data->gpio) == data->active_level);
+    data->stable_ms += 100;            /* tick period */
 
-    if (pressed != data->current_state) {
-        data->current_state = pressed;
+    if (raw != data->stable_pressed && data->stable_ms >= BUTTON_DEBOUNCE_MS) {
+        data->stable_pressed = raw;
+        data->stable_ms = 0;
+
         cJSON *value = cJSON_CreateObject();
-        cJSON_AddBoolToObject(value, "pressed", pressed);
-        event_bus_publish(EVENT_DEVICE_VALUE_CHANGED, dev->id, value);
-        cJSON_Delete(value);
+        if (value) {
+            cJSON_AddBoolToObject(value, "pressed", raw);
+            event_bus_publish(EVENT_DEVICE_VALUE_CHANGED, dev->id, value);
+            cJSON_Delete(value);
+        }
+
+        ESP_LOGI(TAG, "Button '%s' %s", dev->id, raw ? "pressed" : "released");
     }
 
     return ESP_OK;

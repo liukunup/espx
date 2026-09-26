@@ -11,6 +11,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
+#include <esp_system.h>
+#include <esp_timer.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
 #include <esp_https_server.h>
 #include <esp_http_server.h>
 #include <cJSON.h>
@@ -19,141 +23,27 @@
 #include "node_config.h"
 #include "device_manager.h"
 #include "device_type.h"
+#include "ota_service/ota_service.h"
 #include "cert_manager/cert_manager.h"
+#include "test_mode/test_mode.h"
 
 static const char *TAG = "web_server";
 
 static httpd_handle_t g_server = NULL;
 
-// Embedded HTML page (kept simple - in production use SPIFFS or partition)
-static const char index_html[] =
-"<!DOCTYPE html>"
-"<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-"<title>ESPX Device Manager</title>"
-"<style>"
-":root{--p:#2563eb;--bg:#f8fafc;--card:#fff;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--ok:#22c55e;--err:#ef4444}"
-"*{*{margin:0;padding:0;box-sizing:border-box}"
-"body{font-family:-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}"
-"header{background:var(--p);color:#fff;padding:1rem 2rem;display:flex;justify-content:space-between;align-items:center}"
-"header h1{font-size:1.25rem}"
-".status{font-size:.875rem;display:flex;gap:1rem;align-items:center}"
-".dot{width:10px;height:10px;border-radius:50%;background:var(--err)}"
-".dot.ok{background:var(--ok)}"
-"main{max-width:1200px;margin:2rem auto;padding:0 1rem}"
-"nav{display:flex;gap:.5rem;margin-bottom:1.5rem;flex-wrap:wrap}"
-".tab{padding:.75rem 1.5rem;border:none;background:var(--card);color:var(--muted);border-radius:.5rem;cursor:pointer;border:1px solid var(--border)}"
-".tab.active{background:var(--p);color:#fff;border-color:var(--p)}"
-".card{background:var(--card);border-radius:.75rem;padding:1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.1);margin-bottom:1rem}"
-".card h2{font-size:1.125rem;margin-bottom:1rem}"
-".info{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}"
-".info-item{padding:.75rem;background:var(--bg);border-radius:.5rem}"
-".lbl{font-size:.75rem;color:var(--muted);text-transform:uppercase}"
-".val{font-size:1rem;font-weight:500}"
-".row{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border-bottom:1px solid var(--border)}"
-".row:last-child{border-bottom:none}"
-".badge{padding:.25rem .5rem;border-radius:.25rem;font-size:.75rem;background:var(--bg);color:var(--muted)}"
-".badge.ok{background:#dcfce7;color:#166534}"
-".badge.err{background:#fee2e2;color:#991b1b}"
-"button{padding:.5rem 1rem;border:none;border-radius:.375rem;cursor:pointer;font-size:.875rem}"
-".btn-p{background:var(--p);color:#fff}"
-".btn-d{background:var(--err);color:#fff}"
-".btn-s{background:var(--bg);border:1px solid var(--border)}"
-"input,select{padding:.5rem;border:1px solid var(--border);border-radius:.375rem;font-size:.875rem;width:100%}"
-".form-g{margin-bottom:.75rem}"
-".form-g label{display:block;font-size:.875rem;margin-bottom:.25rem}"
-".toast{position:fixed;bottom:1rem;right:1rem;padding:1rem 1.5rem;border-radius:.5rem;color:#fff;font-weight:500;transform:translateY(100px);opacity:0;transition:all .3s;z-index:1000}"
-".toast.show{transform:translateY(0);opacity:1}"
-".toast.success{background:var(--ok)}"
-".toast.error{background:var(--err)}"
-".modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:100}"
-".modal.show{display:flex}"
-".modal-content{background:#fff;border-radius:.75rem;padding:2rem;max-width:500px;width:90%;max-height:80vh;overflow-y:auto}"
-".modal-content h3{margin-bottom:1rem}"
-"</style></head>"
-"<body>"
-"<header><h1>ESPX Device Manager</h1><div class='status'><span id='cs'>Connecting...</span><div id='cd' class='dot'></div></div></header>"
-"<main>"
-"<nav>"
-"<button class='tab active' data-tab='dashboard'>Dashboard</button>"
-"<button class='tab' data-tab='devices'>Devices</button>"
-"<button class='tab' data-tab='system'>System</button>"
-"</nav>"
-"<div id='dashboard-tab' class='tab-content'>"
-"<div class='card'><h2>Node Info</h2><div class='info'>"
-"<div class='info-item'><div class='lbl'>Device ID</div><div class='val' id='i-device-id'>-</div></div>"
-"<div class='info-item'><div class='lbl'>Name</div><div class='val' id='i-name'>-</div></div>"
-"<div class='info-item'><div class='lbl'>Version</div><div class='val' id='i-version'>-</div></div>"
-"<div class='info-item'><div class='lbl'>Devices</div><div class='val' id='i-device-count'>-</div></div>"
-"</div></div>"
-"<div class='card'><h2>Device Values</h2><div id='device-values'>Loading...</div></div>"
-"</div>"
-"<div id='devices-tab' class='tab-content' style='display:none'>"
-"<div class='card'>"
-"<div style='display:flex;justify-content:space-between;margin-bottom:1rem'>"
-"<h2>Devices</h2>"
-"<button class='btn-p' id='add-device-btn'>+ Add Device</button>"
-"</div>"
-"<div id='device-list'>Loading...</div>"
-"</div>"
-"</div>"
-"<div id='system-tab' class='tab-content' style='display:none'>"
-"<div class='card'>"
-"<h2>System Actions</h2>"
-"<div style='display:flex;gap:.5rem;margin-top:1rem'>"
-"<button class='btn-d' id='reboot-btn'>Reboot Device</button>"
-"<button class='btn-s' id='reload-btn'>Reload Devices</button>"
-"</div>"
-"</div>"
-"</div>"
-"</main>"
-"<div id='toast' class='toast'></div>"
-"<div id='add-modal' class='modal'>"
-"<div class='modal-content'>"
-"<h3>Add Device</h3>"
-"<div class='form-g'><label>Device ID</label><input id='m-id' placeholder='my_device_1'></div>"
-"<div class='form-g'><label>Type</label><select id='m-type'></select></div>"
-"<div id='m-config-fields'></div>"
-"<div style='display:flex;gap:.5rem;margin-top:1rem'>"
-"<button class='btn-p' id='m-save'>Save</button>"
-"<button class='btn-s' id='m-cancel'>Cancel</button>"
-"</div></div></div>"
-"<script>"
-"const A='';"
-"function toast(m,t='success'){const e=document.getElementById('toast');e.textContent=m;e.className='toast '+t+' show';setTimeout(()=>e.classList.remove('show'),3000)}"
-"async function api(p,o={}){try{const r=await fetch(A+p,{headers:{'Content-Type':'application/json'},...o});const d=await r.json();return d}catch(e){toast('Connection error','error');throw e}}"
-"async function loadNode(){const i=await api('/api/node');document.getElementById('i-device-id').textContent=i.device_id;document.getElementById('i-name').textContent=i.name;document.getElementById('i-version').textContent=i.version;document.getElementById('i-device-count').textContent=i.device_count;document.getElementById('cs').textContent='Connected';document.getElementById('cd').classList.add('ok')}"
-"async function loadDevices(){const d=await api('/api/devices');const c=document.getElementById('device-values');if(d.length===0){c.innerHTML='<p style=\"color:var(--muted);text-align:center\">No devices configured</p>';return}"
-"c.innerHTML=d.map(x=>`<div class=\"row\"><div><strong>${x.id}</strong><br><small style=\"color:var(--muted)\">${x.type}</small></div><div class=\"val\">${x.value!==undefined?JSON.stringify(x.value):'-'}</div></div>`).join('');"
-"const list=document.getElementById('device-list');"
-"if(d.length===0){list.innerHTML='<p style=\"color:var(--muted);text-align:center\">No devices configured</p>'}"
-"else{list.innerHTML=d.map(x=>`<div class=\"row\"><div><strong>${x.id}</strong> <span class=\"badge\">${x.type}</span><br><small style=\"color:var(--muted)\">${x.initialized?'initialized':'not initialized'}</small></div><div style=\"display:flex;gap:.5rem\"><button class=\"btn-s\" onclick=\"readDev('${x.id}')\">Read</button><button class=\"btn-s\" onclick=\"toggleDev('${x.id}',${!x.enabled})\">${x.enabled?'Disable':'Enable'}</button><button class=\"btn-d\" onclick=\"delDev('${x.id}')\">Delete</button></div></div>`).join('')}"
-"}"
-"async function loadTypes(){const t=await api('/api/device-types');return t}"
-"document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(x=>x.style.display='none');b.classList.add('active');document.getElementById(b.dataset.tab+'-tab').style.display='block'}))"
-"async function readDev(id){try{const v=await api('/api/devices/'+id+'/read',{method:'POST'});toast(id+': '+JSON.stringify(v));loadDevices()}catch(e){}}"
-"async function toggleDev(id,en){try{await api('/api/devices/'+id+'/enable',{method:'POST',body:JSON.stringify({enabled:en})});loadDevices()}catch(e){}}"
-"async function delDev(id){if(!confirm('Delete '+id+'?'))return;try{await api('/api/devices/'+id,{method:'DELETE'});loadDevices();toast('Deleted')}catch(e){}}"
-"document.getElementById('reboot-btn').addEventListener('click',async()=>{if(confirm('Reboot?'))await api('/api/system/reboot',{method:'POST'})})"
-"document.getElementById('reload-btn').addEventListener('click',async()=>{await api('/api/devices/reload',{method:'POST'});loadDevices();toast('Reloaded')})"
-"document.getElementById('add-device-btn').addEventListener('click',async()=>{const types=await loadTypes();const sel=document.getElementById('m-type');sel.innerHTML=types.map(t=>`<option value=\"${t.name}\">${t.name} - ${t.description}</option>`).join('');sel.onchange=()=>updateConfigFields(sel.value);document.getElementById('add-modal').classList.add('show')})"
-"function updateConfigFields(type){const types=window._deviceTypes||[];const t=types.find(x=>x.name===type);if(!t)return;const c=document.getElementById('m-config-fields');c.innerHTML=Object.keys(t.default_config).map(k=>`<div class=\"form-g\"><label>${k}</label><input id=\"m-cfg-${k}\" value=\"${t.default_config[k]}\"></div>`).join('')}"
-"document.getElementById('m-cancel').addEventListener('click',()=>document.getElementById('add-modal').classList.remove('show'))"
-"document.getElementById('m-save').addEventListener('click',async()=>{const id=document.getElementById('m-id').value;const type=document.getElementById('m-type').value;const cfg={};"
-"document.querySelectorAll('[id^=\"m-cfg-\"]').forEach(e=>{cfg[e.id.substring(6)]=isNaN(+e.value)?e.value:+e.value});"
-"try{await api('/api/devices',{method:'POST',body:JSON.stringify({id,type,config:cfg})});toast('Added');document.getElementById('add-modal').classList.remove('show');loadDevices()}catch(e){}})"
-"async function init(){try{await loadNode();await loadDevices()}catch(e){console.error(e)}"
-"const types=await loadTypes();window._deviceTypes=types;}"
-"init();setInterval(loadDevices,5000);"
-"</script></body></html>";
+// Embedded web UI (see main/web_server/web_files/index.html)
+extern const uint8_t index_html_start[] asm("_binary_index_html_start");
+extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 
 /**
- * @brief Root handler - serve main page
+ * @brief Root handler - serve embedded UI
  */
 static esp_err_t root_handler(httpd_req_t *req)
 {
+    size_t len = index_html_end - index_html_start;
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    return httpd_resp_send(req, (const char *)index_html_start, len);
 }
 
 /**
@@ -241,21 +131,25 @@ static esp_err_t api_devices_list_handler(httpd_req_t *req)
 {
     cJSON *json = cJSON_CreateArray();
 
-    size_t count;
-    const device_t *devices = device_get_all(&count);
+    for (size_t i = 0; i < device_get_count(); i++) {
+        const device_t *dev = device_get_by_index(i);
+        if (dev == NULL) continue;
 
-    for (size_t i = 0; i < count; i++) {
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "id", devices[i].id);
-        cJSON_AddStringToObject(item, "type", devices[i].type->name);
-        cJSON_AddStringToObject(item, "description", devices[i].type->description);
-        cJSON_AddBoolToObject(item, "enabled", devices[i].enabled);
-        cJSON_AddBoolToObject(item, "initialized", devices[i].initialized);
+        cJSON_AddStringToObject(item, "id", dev->id);
+        cJSON_AddStringToObject(item, "type", dev->type->name);
+        cJSON_AddStringToObject(item, "description", dev->type->description);
+        cJSON_AddBoolToObject(item, "enabled", dev->enabled);
+        cJSON_AddBoolToObject(item, "initialized", dev->initialized);
 
-        // Get current value
-        if (devices[i].enabled && devices[i].initialized && devices[i].type->read) {
+        if (dev->config != NULL) {
+            cJSON_AddItemToObject(item, "config", cJSON_Duplicate((cJSON *)dev->config, true));
+        }
+
+        /* Current value (only for live, readable devices) */
+        if (dev->enabled && dev->initialized && dev->type->read) {
             cJSON *value = cJSON_CreateObject();
-            if (devices[i].type->read((device_t*)&devices[i], value) == ESP_OK) {
+            if (dev->type->read((device_t *)dev, value) == ESP_OK) {
                 cJSON_AddItemToObject(item, "value", value);
             } else {
                 cJSON_Delete(value);
@@ -483,22 +377,52 @@ static esp_err_t api_device_types_handler(httpd_req_t *req)
 {
     cJSON *json = cJSON_CreateArray();
 
-    size_t count;
-    const device_type_t *types = device_type_get_all(&count);
+    for (size_t i = 0; i < device_type_count(); i++) {
+        const device_type_t *t = device_type_get_by_index(i);
+        if (t == NULL) continue;
 
-    for (size_t i = 0; i < count; i++) {
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "name", types[i].name);
-        cJSON_AddStringToObject(item, "description", types[i].description);
-        cJSON_AddNumberToObject(item, "capabilities", types[i].capabilities);
+        cJSON_AddStringToObject(item, "name", t->name);
+        cJSON_AddStringToObject(item, "description", t->description);
+        cJSON_AddNumberToObject(item, "capabilities", t->capabilities);
 
         cJSON *cfg = cJSON_CreateObject();
-        if (types[i].get_default_config) {
-            types[i].get_default_config(cfg);
+        if (t->get_default_config) {
+            t->get_default_config(cfg);
         }
         cJSON_AddItemToObject(item, "default_config", cfg);
 
         cJSON_AddItemToArray(json, item);
+    }
+
+    return send_json(req, json, 200);
+}
+
+/**
+ * @brief GET /api/system/info - runtime info
+ */
+static esp_err_t api_system_info_handler(httpd_req_t *req)
+{
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "uptime", (double)(esp_timer_get_time() / 1000000ULL));
+    cJSON_AddNumberToObject(json, "free_heap", (double)esp_get_free_heap_size());
+    cJSON_AddNumberToObject(json, "min_free_heap", (double)esp_get_minimum_free_heap_size());
+
+    /* Wi-Fi state + IP */
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        cJSON_AddStringToObject(json, "wifi_ssid", (const char *)ap.ssid);
+        cJSON_AddNumberToObject(json, "wifi_rssi", ap.rssi);
+    }
+
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif) {
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), IPSTR, IP2STR(&ip.ip));
+            cJSON_AddStringToObject(json, "ip", buf);
+        }
     }
 
     return send_json(req, json, 200);
@@ -555,6 +479,106 @@ static esp_err_t api_network_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief GET /api/ota/status - OTA status
+ */
+static esp_err_t api_ota_status_handler(httpd_req_t *req)
+{
+    ota_status_t st;
+    ota_service_get_status(&st);
+
+    static const char *names[] = {
+        "IDLE", "CONNECTING", "DOWNLOADING", "VERIFYING",
+        "APPLYING", "REBOOTING", "SUCCESS", "FAILED"
+    };
+
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "state",
+                            names[st.state <= OTA_STATE_FAILED ? st.state : OTA_STATE_FAILED]);
+    cJSON_AddNumberToObject(json, "progress", st.progress);
+    cJSON_AddNumberToObject(json, "bytes_read", st.bytes_read);
+    cJSON_AddNumberToObject(json, "total_size", st.total_size);
+    cJSON_AddStringToObject(json, "url", st.url);
+    cJSON_AddStringToObject(json, "error", st.error);
+    cJSON_AddStringToObject(json, "running_version", st.running_version);
+    cJSON_AddBoolToObject(json, "running", ota_service_is_running());
+
+    return send_json(req, json, 200);
+}
+
+/**
+ * @brief POST /api/ota/start - start delta OTA
+ * Body: {"url": "http://server/espx.patch"}  (url optional if stored)
+ */
+static esp_err_t api_ota_start_handler(httpd_req_t *req)
+{
+    char buf[384];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return send_error(req, "Empty body", 400);
+    buf[len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (root == NULL) return send_error(req, "Invalid JSON", 400);
+
+    cJSON *jurl = cJSON_GetObjectItem(root, "url");
+    if (!cJSON_IsString(jurl) || jurl->valuestring[0] == '\0') {
+        cJSON_Delete(root);
+        return send_error(req, "Missing 'url'", 400);
+    }
+
+    esp_err_t err = ota_service_start(jurl->valuestring);
+    cJSON_Delete(root);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "started", err == ESP_OK);
+    if (err != ESP_OK) {
+        cJSON_AddStringToObject(resp, "error", esp_err_to_name(err));
+    }
+    return send_json(req, resp, err == ESP_OK ? 200 : 400);
+}
+
+/**
+ * @brief POST /api/ota/cancel - cancel OTA
+ */
+static esp_err_t api_ota_cancel_handler(httpd_req_t *req)
+{
+    esp_err_t err = ota_service_cancel();
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "cancelled", err == ESP_OK);
+    return send_json(req, resp, 200);
+}
+
+/**
+ * @brief GET /api/certs/info - certificate info
+ */
+static esp_err_t api_certs_info_handler(httpd_req_t *req)
+{
+    char info[256];
+    cert_manager_get_info(info, sizeof(info));
+    cJSON *json = cJSON_Parse(info);
+    if (json == NULL) {
+        return send_error(req, "Failed to build cert info", 500);
+    }
+    return send_json(req, json, 200);
+}
+
+/**
+ * @brief POST /api/system/testmode - reboot into manufacturing test mode
+ */
+static esp_err_t api_system_testmode_handler(httpd_req_t *req)
+{
+    ESP_LOGW(TAG, "Test mode requested via web");
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "rebooting_into_test_mode", true);
+    send_json(req, resp, 200);
+
+    vTaskDelay(pdMS_TO_TICKS(200));
+    test_mode_request();
+    esp_restart();
+    return ESP_OK;
+}
+
+/**
  * @brief POST /api/system/reboot
  */
 static esp_err_t api_system_reboot_handler(httpd_req_t *req)
@@ -587,10 +611,10 @@ esp_err_t web_server_start(void)
     config.servercert_len = server_cert.cert_len;
     config.prvtkey_pem = (uint8_t *)server_cert.key_pem;
     config.prvtkey_len = server_cert.key_len;
-    config.httpd.max_uri_handlers = 16;
+    config.httpd.max_uri_handlers = 24;
 
     ESP_LOGI(TAG, "Starting HTTPS server...");
-    err = httpd_ssl_start(&g_server, &config);
+        err = httpd_ssl_start(&g_server, &config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start HTTPS: %s", esp_err_to_name(err));
         cert_manager_free_cert(&server_cert);
@@ -602,13 +626,19 @@ esp_err_t web_server_start(void)
         { .uri = "/",                   .method = HTTP_GET,    .handler = root_handler },
         { .uri = "/api/node",           .method = HTTP_GET,    .handler = api_node_handler },
         { .uri = "/api/node",           .method = HTTP_PUT,    .handler = api_node_handler },
+        { .uri = "/api/system/info",    .method = HTTP_GET,    .handler = api_system_info_handler },
         { .uri = "/api/network",        .method = HTTP_GET,    .handler = api_network_handler },
         { .uri = "/api/network",        .method = HTTP_PUT,    .handler = api_network_handler },
         { .uri = "/api/devices",        .method = HTTP_GET,    .handler = api_devices_list_handler },
         { .uri = "/api/devices",        .method = HTTP_POST,   .handler = api_device_add_handler },
         { .uri = "/api/devices/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },
         { .uri = "/api/device-types",   .method = HTTP_GET,    .handler = api_device_types_handler },
+        { .uri = "/api/ota/status",     .method = HTTP_GET,    .handler = api_ota_status_handler },
+        { .uri = "/api/ota/start",      .method = HTTP_POST,   .handler = api_ota_start_handler },
+        { .uri = "/api/ota/cancel",     .method = HTTP_POST,   .handler = api_ota_cancel_handler },
+        { .uri = "/api/certs/info",     .method = HTTP_GET,    .handler = api_certs_info_handler },
         { .uri = "/api/system/reboot",  .method = HTTP_POST,   .handler = api_system_reboot_handler },
+        { .uri = "/api/system/testmode",.method = HTTP_POST,   .handler = api_system_testmode_handler },
         // Wildcard dispatcher must be last
         { .uri = "/api/devices/*",      .method = HTTP_GET,    .handler = api_device_dispatch_handler },
         { .uri = "/api/devices/*",      .method = HTTP_POST,   .handler = api_device_dispatch_handler },

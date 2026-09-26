@@ -24,10 +24,11 @@
 #include "wifi_prov/wifi_prov.h"
 #include "test_mode/test_mode.h"
 #include "mfg_provision/mfg_provision.h"
+#include "ota_service/ota_service.h"
 
 static const char *TAG = "app_main";
 
-void app_main(void)
+static void print_banner(void)
 {
     printf("\n================================================\n");
     printf("           ESPX IoT Device Firmware\n");
@@ -37,59 +38,79 @@ void app_main(void)
     printf("  Chip     : ESP32-S3\n");
     printf("  Build    : %s %s\n", __DATE__, __TIME__);
     printf("================================================\n\n");
+}
 
-    // Manufacturing test mode: hold TEST_MODE_GPIO low at boot
-    if (test_mode_check_trigger() == ESP_OK) {
-        ESP_LOGI(TAG, "Test mode triggered, entering self-test console");
-        test_mode_enter();
-        // Never returns
-    }
+void app_main(void)
+{
+    print_banner();
 
+    /* ---- 1. Storage ---------------------------------------------------- */
+    /* NVS must be initialised before the test-mode check reads its request flag. */
     ESP_LOGI(TAG, "Initializing NVS...");
     ESP_ERROR_CHECK(nvs_flash_init());
 
-    // Wi-Fi provisioning (initializes netif, event loop, Wi-Fi)
-    // Must come before MQTT / web server
-    ESP_LOGI(TAG, "Initializing Wi-Fi provisioning...");
-    ESP_ERROR_CHECK(wifi_prov_init());
-    ESP_ERROR_CHECK(wifi_prov_start(NULL));
-    wifi_prov_wait_for_connection();
-    ESP_LOGI(TAG, "Wi-Fi connected");
+    /* ---- 2. Manufacturing test mode ------------------------------------ */
+    /* Entered via an NVS request flag, or TEST_MODE_GPIO when configured. */
+    if (test_mode_check_trigger() == ESP_OK) {
+        ESP_LOGI(TAG, "Test mode triggered, entering self-test console");
+        test_mode_enter();              /* never returns */
+    }
 
-    // Initialize core services
-    ESP_LOGI(TAG, "Initializing core services...");
+    /* Start the BOOT long-press watchdog early: Wi-Fi provisioning below blocks
+     * until credentials arrive, and a factory-fresh device must still be able
+     * to reach test mode. */
+    test_mode_start_longpress_watchdog();
+
+    /* ---- 3. Configuration ---------------------------------------------- */
+    ESP_LOGI(TAG, "Initializing configuration...");
     ESP_ERROR_CHECK(node_config_init());
     ESP_ERROR_CHECK(node_config_load());
+
+    /* ---- 4. Core services ---------------------------------------------- */
+    ESP_LOGI(TAG, "Initializing core services...");
     ESP_ERROR_CHECK(event_bus_init());
     ESP_ERROR_CHECK(device_type_registry_init());
     ESP_ERROR_CHECK(peripherals_register_all());
     ESP_ERROR_CHECK(device_manager_init());
     ESP_ERROR_CHECK(device_manager_load());
 
-    // Apply factory-preset configuration (if any)
-    ESP_LOGI(TAG, "Checking for factory configuration...");
+    /* ---- 5. Factory provisioning -------------------------------------- */
+    /* Applied after node_config and the device manager are up, because it
+     * writes into both. Also supplies pre-provisioned Wi-Fi credentials. */
     if (mfg_provision_has_data()) {
-        ESP_LOGI(TAG, "Factory configuration found, applying...");
+        ESP_LOGI(TAG, "Applying factory configuration...");
         if (mfg_provision_load() != ESP_OK) {
             ESP_LOGW(TAG, "Failed to apply factory configuration");
         }
     }
 
-    // Initialize LED
-    ESP_LOGI(TAG, "Initializing LED driver...");
-    ESP_ERROR_CHECK(led_driver_init());
-    led_set_status("connected");
+    /* ---- 6. Network ---------------------------------------------------- */
+    ESP_LOGI(TAG, "Initializing Wi-Fi...");
+    ESP_ERROR_CHECK(wifi_prov_init());
+    ESP_ERROR_CHECK(wifi_prov_start(NULL));
 
-    // Initialize certificates + HTTPS web server
+    /* ---- 7. HTTPS ------------------------------------------------------- */
+    /* Started before waiting for the station connection: during provisioning
+     * the device's own SoftAP is up, so an installer can reach the
+     * configuration UI in a browser without a mobile app. */
     ESP_LOGI(TAG, "Initializing certificate manager...");
     ESP_ERROR_CHECK(cert_manager_init());
 
     ESP_LOGI(TAG, "Starting HTTPS web server...");
-    if (web_server_start() != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start web server");
+    esp_err_t err = web_server_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(err));
     }
 
-    // Initialize MQTT
+    ESP_LOGI(TAG, "Waiting for Wi-Fi connection...");
+    wifi_prov_wait_for_connection();
+    ESP_LOGI(TAG, "Wi-Fi connected");
+
+    /* ---- 8. Status LED -------------------------------------------------- */
+    ESP_ERROR_CHECK(led_driver_init());
+    led_set_status("connected");
+
+    /* ---- 9. MQTT -------------------------------------------------------- */
     ESP_LOGI(TAG, "Initializing MQTT...");
     ESP_ERROR_CHECK(mqtt_client_init());
     ESP_ERROR_CHECK(mqtt_commander_init());
@@ -97,13 +118,22 @@ void app_main(void)
     ESP_ERROR_CHECK(mqtt_client_start());
     ESP_ERROR_CHECK(mqtt_publisher_start());
 
-    ESP_LOGI(TAG, "ESPX device started! Device ID: %s, devices: %d",
+    /* ---- 10. OTA -------------------------------------------------------- */
+    ESP_LOGI(TAG, "Initializing OTA service...");
+    ESP_ERROR_CHECK(ota_service_init());
+    /* This firmware booted; cancel any pending rollback. */
+    ota_service_mark_valid();
+
+    ESP_LOGI(TAG, "================================================");
+    ESP_LOGI(TAG, "ESPX ready — device id %s, %d device(s) bound",
              node_config_get_device_id(), (int)device_get_count());
+    ESP_LOGI(TAG, "Web UI: https://<device-ip>/  (self-signed certificate)");
+    ESP_LOGI(TAG, "================================================");
 
     event_bus_publish(EVENT_NODE_READY, NULL, NULL);
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        ESP_LOGD(TAG, "Main loop alive...");
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        ESP_LOGD(TAG, "idle");
     }
 }

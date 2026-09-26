@@ -87,9 +87,18 @@ esp_err_t device_update_config(const char *id, const cJSON *config);
 struct device* device_get(const char *id);
 
 /**
- * @brief Get all devices
+ * @brief Get device by index
+ *
+ * Iterate with:
+ *   for (size_t i = 0; i < device_get_count(); i++) {
+ *       const struct device *dev = device_get_by_index(i);
+ *       ...
+ *   }
+ *
+ * @param index 0 .. device_get_count()-1
+ * @return Device pointer, or NULL if out of range
  */
-const struct device* device_get_all(size_t *count);
+const struct device* device_get_by_index(size_t index);
 
 /**
  * @brief Get number of devices

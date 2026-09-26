@@ -15,18 +15,33 @@ menu "ESPX Configuration"
         depends on ESPX
 
     config MFG_TEST_GPIO
-        int "Manufacturing Test GPIO"
-        default 0
+        int "Manufacturing Test trigger GPIO (-1 = disabled)"
+        default -1
         depends on ESPX
         help
-            GPIO pin to trigger test mode on boot (low = test mode)
+            GPIO held LOW at boot to enter manufacturing test mode.
+
+            Set to -1 (default) to disable the boot-time GPIO trigger.
+
+            WARNING: do not use a strapping pin (GPIO0/GPIO3/GPIO45/GPIO46 on
+            ESP32-S3). Holding GPIO0 low across reset makes the chip enter the
+            ROM UART download mode, so the application never runs.
+
+            With the trigger disabled, test mode is still reachable by holding
+            the BOOT button for ~3 s while the application is running, from the
+            Web UI, or over MQTT.
 
     config LED_GPIO
-        int "LED GPIO"
-        default 48
+        int "Status LED GPIO (-1 = disabled)"
+        default -1
         depends on ESPX
         help
-            GPIO pin connected to WS2812 LED
+            GPIO of a single WS2812 status LED driven by the led_driver
+            component. Set to -1 (default) to disable it.
+
+            Note: the ws2812 peripheral driver can also drive the same LED. Do
+            not enable both on the same GPIO: they create separate RMT channels
+            and will fight over the pin.
 
     config LED_STRIP_LENGTH
         int "LED Strip Length"

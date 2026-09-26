@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESPX Node</title>
+<style>
+:root{
+  --p:#2563eb;--p2:#1d4ed8;--bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;
+  --border:#e2e8f0;--ok:#16a34a;--warn:#d97706;--err:#dc2626;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--text);line-height:1.55;font-size:15px}
+header{background:var(--p);color:#fff;padding:.85rem 1.5rem;display:flex;
+  justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
+header h1{font-size:1.1rem;font-weight:600}
+header h1 small{opacity:.75;font-weight:400;font-size:.8rem;margin-left:.5rem}
+.status{font-size:.8rem;display:flex;gap:.6rem;align-items:center}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--err)}
+.dot.ok{background:#4ade80}
+main{max-width:1100px;margin:1.5rem auto;padding:0 1rem}
+nav{display:flex;gap:.4rem;margin-bottom:1.25rem;flex-wrap:wrap}
+.tab{padding:.5rem 1.1rem;border:1px solid var(--border);background:var(--card);
+  color:var(--muted);border-radius:.5rem;cursor:pointer;font-size:.875rem;font-weight:500}
+.tab:hover{border-color:var(--p);color:var(--p)}
+.tab.active{background:var(--p);color:#fff;border-color:var(--p)}
+.card{background:var(--card);border-radius:.75rem;padding:1.25rem;
+  box-shadow:0 1px 3px rgba(15,23,42,.08);margin-bottom:1rem}
+.card h2{font-size:1rem;margin-bottom:.9rem;display:flex;justify-content:space-between;
+  align-items:center;gap:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem}
+.item{padding:.7rem .85rem;background:var(--bg);border-radius:.5rem}
+.lbl{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.val{font-size:1rem;font-weight:600;word-break:break-all}
+.row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  padding:.7rem 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.row .meta{font-size:.78rem;color:var(--muted)}
+.badge{display:inline-block;padding:.15rem .45rem;border-radius:.3rem;font-size:.7rem;
+  background:var(--bg);color:var(--muted);font-weight:600}
+.badge.ok{background:#dcfce7;color:#166534}
+.badge.warn{background:#fef3c7;color:#92400e}
+.badge.err{background:#fee2e2;color:#991b1b}
+button{padding:.45rem .9rem;border:none;border-radius:.4rem;cursor:pointer;
+  font-size:.82rem;font-weight:500}
+button:disabled{opacity:.5;cursor:not-allowed}
+.btn-p{background:var(--p);color:#fff}.btn-p:hover{background:var(--p2)}
+.btn-s{background:var(--bg);color:var(--text);border:1px solid var(--border)}
+.btn-s:hover{border-color:var(--p)}
+.btn-d{background:var(--err);color:#fff}
+.btns{display:flex;gap:.4rem;flex-wrap:wrap}
+input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:.4rem;
+  font-size:.85rem;width:100%;font-family:inherit;background:#fff}
+input:focus,select:focus{outline:2px solid #bfdbfe;border-color:var(--p)}
+.fg{margin-bottom:.7rem}
+.fg label{display:block;font-size:.8rem;font-weight:500;margin-bottom:.25rem}
+.fg .hint{font-size:.72rem;color:var(--muted);margin-top:.2rem}
+.bar{height:7px;background:var(--bg);border-radius:4px;overflow:hidden;margin-top:.5rem}
+.bar>div{height:100%;background:var(--p);width:0;transition:width .3s}
+.toast{position:fixed;bottom:1rem;right:1rem;padding:.75rem 1.1rem;border-radius:.5rem;
+  color:#fff;font-weight:500;font-size:.85rem;transform:translateY(120px);opacity:0;
+  transition:all .25s;z-index:1000;max-width:80vw}
+.toast.show{transform:none;opacity:1}
+.toast.ok{background:var(--ok)}.toast.err{background:var(--err)}.toast.warn{background:var(--warn)}
+.modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;
+  align-items:center;justify-content:center;z-index:100;padding:1rem}
+.modal.show{display:flex}
+.modal-box{background:#fff;border-radius:.75rem;padding:1.5rem;width:100%;max-width:460px;
+  max-height:85vh;overflow-y:auto}
+.modal-box h3{margin-bottom:1rem;font-size:1rem}
+.hide{display:none!important}
+pre{background:#0f172a;color:#e2e8f0;padding:.75rem;border-radius:.5rem;
+  font-size:.75rem;overflow-x:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>ESPX Node <small id="hdr-id"></small></h1>
+  <div class="status"><span id="hdr-status">connecting…</span><div id="hdr-dot" class="dot"></div></div>
+</header>
+
+<main>
+<nav>
+  <button class="tab active" data-tab="dash">Dashboard</button>
+  <button class="tab" data-tab="devices">Devices</button>
+  <button class="tab" data-tab="network">Network</button>
+  <button class="tab" data-tab="ota">Firmware</button>
+  <button class="tab" data-tab="system">System</button>
+</nav>
+
+<!-- ================= Dashboard ================= -->
+<section id="tab-dash">
+  <div class="card">
+    <h2>Node</h2>
+    <div class="grid">
+      <div class="item"><div class="lbl">Device ID</div><div class="val" id="n-id">-</div></div>
+      <div class="item"><div class="lbl">Name</div><div class="val" id="n-name">-</div></div>
+      <div class="item"><div class="lbl">Firmware</div><div class="val" id="n-ver">-</div></div>
+      <div class="item"><div class="lbl">Devices</div><div class="val" id="n-count">-</div></div>
+      <div class="item"><div class="lbl">Uptime</div><div class="val" id="n-up">-</div></div>
+      <div class="item"><div class="lbl">Free heap</div><div class="val" id="n-heap">-</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Live values <button class="btn-s" onclick="refresh()">Refresh</button></h2>
+    <div id="live"><div class="meta">Loading…</div></div>
+  </div>
+</section>
+
+<!-- ================= Devices ================= -->
+<section id="tab-devices" class="hide">
+  <div class="card">
+    <h2>Bound devices <button class="btn-p" id="btn-add">+ Add device</button></h2>
+    <div id="dev-list">Loading…</div>
+  </div>
+</section>
+
+<!-- ================= Network ================= -->
+<section id="tab-network" class="hide">
+  <div class="card">
+    <h2>Wi-Fi</h2>
+    <div class="grid">
+      <div class="item"><div class="lbl">Status</div><div class="val" id="w-status">-</div></div>
+      <div class="item"><div class="lbl">SSID</div><div class="val" id="w-ssid">-</div></div>
+      <div class="item"><div class="lbl">IP</div><div class="val" id="w-ip">-</div></div>
+    </div>
+    <p class="hint" style="margin-top:.75rem">To change Wi-Fi, re-run provisioning
+      (hold the provisioning action / erase credentials and reboot).</p>
+  </div>
+  <div class="card">
+    <h2>MQTT</h2>
+    <form id="net-form">
+      <div class="fg"><label>Broker URL</label>
+        <input id="net-broker" placeholder="mqtt://broker.example.com:1883">
+      </div>
+      <div class="fg"><label>Username</label><input id="net-user" placeholder="(optional)"></div>
+      <div class="fg"><label>Password</label><input id="net-pass" type="password" placeholder="(optional)"></div>
+      <div class="fg"><label>Topic prefix</label>
+        <input id="net-prefix" placeholder="espx/&lt;device-id&gt;">
+        <div class="hint">Topics: <code>&lt;prefix&gt;/state</code>, <code>/sensors</code>, <code>/attrs</code>, <code>/cmd/…</code></div>
+      </div>
+      <div class="btns">
+        <button type="submit" class="btn-p">Save</button>
+        <button type="button" class="btn-s" id="btn-reload-net">Reload</button>
+      </div>
+      <div class="hint">MQTT reconnect is required after changes: reboot the device.</div>
+    </form>
+  </div>
+</section>
+
+<!-- ================= OTA ================= -->
+<section id="tab-ota" class="hide">
+  <div class="card">
+    <h2>Firmware update (delta OTA)</h2>
+    <div class="grid">
+      <div class="item"><div class="lbl">Running version</div><div class="val" id="ota-ver">-</div></div>
+      <div class="item"><div class="lbl">State</div><div class="val" id="ota-state">IDLE</div></div>
+      <div class="item"><div class="lbl">Progress</div><div class="val" id="ota-prog">0%</div></div>
+      <div class="item"><div class="lbl">Received</div><div class="val" id="ota-bytes">0 B</div></div>
+    </div>
+    <div class="bar"><div id="ota-bar"></div></div>
+    <p id="ota-err" class="hint" style="color:var(--err)"></p>
+  </div>
+  <div class="card">
+    <h2>Apply patch</h2>
+    <div class="fg"><label>Patch URL (.patch)</label>
+      <input id="ota-url" placeholder="http://192.168.1.10:8000/espx.patch">
+      <div class="hint">The patch must be built with <code>detools</code> against the
+        <b>currently running</b> firmware. A mismatch is rejected before writing.</div>
+    </div>
+    <div class="btns">
+      <button class="btn-p" id="btn-ota-start">Start update</button>
+      <button class="btn-d" id="btn-ota-cancel" disabled>Cancel</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= System ================= -->
+<section id="tab-system" class="hide">
+  <div class="card">
+    <h2>Node identity</h2>
+    <form id="node-form">
+      <div class="fg"><label>Name</label><input id="sys-name"></div>
+      <div class="fg"><label>Device ID</label><input id="sys-id">
+        <div class="hint">Also used as MQTT client id. Changing it changes all topic paths.</div>
+      </div>
+      <div class="btns"><button type="submit" class="btn-p">Save</button></div>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Certificate</h2>
+    <div id="cert-info" class="meta">-</div>
+  </div>
+  <div class="card">
+    <h2>Actions</h2>
+    <div class="btns">
+      <button class="btn-s" id="btn-reload-dev">Reload devices</button>
+      <button class="btn-s" id="btn-testmode">Enter test mode</button>
+      <button class="btn-d" id="btn-reboot">Reboot</button>
+    </div>
+    <p class="hint" style="margin-top:.6rem">
+      Test mode runs a UART self-test console (no Wi-Fi/MQTT). Also reachable by
+      holding the BOOT button for 3&nbsp;s while the device is running.
+    </p>
+  </div>
+</section>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<div id="modal" class="modal">
+  <div class="modal-box">
+    <h3>Add device</h3>
+    <div class="fg"><label>Device ID</label><input id="m-id" placeholder="temp_indoor"></div>
+    <div class="fg"><label>Type</label><select id="m-type"></select></div>
+    <div id="m-cfg"></div>
+    <div class="btns" style="margin-top:1rem">
+      <button class="btn-p" id="m-save">Add</button>
+      <button class="btn-s" id="m-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+let TYPES = [];
+
+function toast(msg, kind = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + kind + ' show';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = 'toast ' + kind, 3200);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' }, ...opts
+  });
+  const txt = await res.text();
+  let data = null;
+  try { data = txt ? JSON.parse(txt) : null; } catch (e) { data = { raw: txt }; }
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+
+const fmtBytes = b => b < 1024 ? b + ' B'
+  : b < 1048576 ? (b / 1024).toFixed(1) + ' KB'
+  : (b / 1048576).toFixed(2) + ' MB';
+
+const fmtUptime = s => {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
+        m = Math.floor(s % 3600 / 60), ss = s % 60;
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  if (m) return m + 'm ' + ss + 's';
+  return ss + 's';
+};
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const json = v => v == null ? '-' : esc(JSON.stringify(v));
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('main > section').forEach(x => x.classList.add('hide'));
+  b.classList.add('active');
+  document.getElementById('tab-' + b.dataset.tab).classList.remove('hide');
+}));
+
+/* ---------- dashboard ---------- */
+async function loadNode() {
+  const n = await api('/api/node');
+  document.getElementById('hdr-id').textContent = n.device_id || '';
+  document.getElementById('n-id').textContent = n.device_id || '-';
+  document.getElementById('n-name').textContent = n.name || '-';
+  document.getElementById('n-ver').textContent = n.version || '-';
+  document.getElementById('n-count').textContent = n.device_count;
+  document.getElementById('sys-name').value = n.name || '';
+  document.getElementById('sys-id').value = n.device_id || '';
+  document.getElementById('hdr-status').textContent = 'online';
+  document.getElementById('hdr-dot').classList.add('ok');
+}
+
+async function loadSys() {
+  try {
+    const s = await api('/api/system/info');
+    document.getElementById('n-up').textContent = fmtUptime(s.uptime || 0);
+    document.getElementById('n-heap').textContent = fmtBytes(s.free_heap || 0);
+    if (s.wifi_ssid) {
+      document.getElementById('w-status').textContent = 'connected';
+      document.getElementById('w-ssid').textContent = s.wifi_ssid;
+      document.getElementById('w-ip').textContent = s.ip || '-';
+    }
+  } catch (e) { /* system info optional */ }
+}
+
+async function loadLive() {
+  const devs = await api('/api/devices');
+  const box = document.getElementById('live');
+  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound.</div>'; return; }
+  box.innerHTML = devs.map(d => `
+    <div class="row">
+      <div>
+        <strong>${esc(d.id)}</strong>
+        <span class="badge">${esc(d.type)}</span>
+        <div class="meta">${esc(d.description || '')}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="val" style="font-size:.9rem">${json(d.value)}</div>
+        <span class="badge ${d.initialized ? 'ok' : 'err'}">${d.initialized ? 'ok' : 'off'}</span>
+      </div>
+    </div>`).join('');
+}
+
+/* ---------- devices ---------- */
+async function loadDevices() {
+  const devs = await api('/api/devices');
+  const box = document.getElementById('dev-list');
+  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound. Use “Add device”.</div>'; return; }
+  box.innerHTML = devs.map(d => `
+    <div class="row">
+      <div>
+        <strong>${esc(d.id)}</strong>
+        <span class="badge">${esc(d.type)}</span>
+        <span class="badge ${d.enabled ? 'ok' : 'warn'}">${d.enabled ? 'enabled' : 'disabled'}</span>
+        <div class="meta">${json(d.config)}</div>
+      </div>
+      <div class="btns">
+        <button class="btn-s" onclick="devRead('${esc(d.id)}')">Read</button>
+        <button class="btn-s" onclick="devToggle('${esc(d.id)}',${!d.enabled})">${d.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn-d" onclick="devDel('${esc(d.id)}')">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+async function devRead(id) {
+  try { toast(id + ': ' + JSON.stringify(await api('/api/devices/' + id + '/read', { method: 'POST' })), 'ok'); }
+  catch (e) { toast('Read failed: ' + e.message, 'err'); }
+}
+async function devToggle(id, en) {
+  try { await api('/api/devices/' + id + '/enable', { method: 'POST', body: JSON.stringify({ enabled: en }) }); refresh(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function devDel(id) {
+  if (!confirm('Delete device "' + id + '"?')) return;
+  try { await api('/api/devices/' + id, { method: 'DELETE' }); toast('Deleted'); refresh(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+/* ---------- add device modal ---------- */
+const modal = document.getElementById('modal');
+
+document.getElementById('btn-add').addEventListener('click', () => {
+  const sel = document.getElementById('m-type');
+  sel.innerHTML = TYPES.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.description)}</option>`).join('');
+  document.getElementById('m-id').value = '';
+  renderCfg(sel.value);
+  modal.classList.add('show');
+});
+document.getElementById('m-type').addEventListener('change', e => renderCfg(e.target.value));
+document.getElementById('m-cancel').addEventListener('click', () => modal.classList.remove('show'));
+
+function renderCfg(type) {
+  const t = TYPES.find(x => x.name === type);
+  const box = document.getElementById('m-cfg');
+  if (!t) { box.innerHTML = ''; return; }
+  box.innerHTML = Object.keys(t.default_config || {}).map(k => `
+    <div class="fg"><label>${esc(k)}</label>
+      <input id="cfg-${esc(k)}" value="${esc(t.default_config[k])}"></div>`).join('');
+}
+
+document.getElementById('m-save').addEventListener('click', async () => {
+  const id = document.getElementById('m-id').value.trim();
+  const type = document.getElementById('m-type').value;
+  if (!id) { toast('Device ID required', 'warn'); return; }
+
+  const config = {};
+  document.querySelectorAll('#m-cfg input').forEach(el => {
+    const v = el.value.trim();
+    config[el.id.substring(4)] = (v !== '' && !isNaN(Number(v))) ? Number(v) : v;
+  });
+
+  try {
+    await api('/api/devices', { method: 'POST', body: JSON.stringify({ id, type, config }) });
+    modal.classList.remove('show');
+    toast('Device added');
+    refresh();
+  } catch (e) { toast('Add failed: ' + e.message, 'err'); }
+});
+
+/* ---------- network ---------- */
+async function loadNet() {
+  try {
+    const n = await api('/api/network');
+    document.getElementById('net-broker').value = n.mqtt_broker || '';
+    document.getElementById('net-user').value = n.mqtt_username || '';
+    document.getElementById('net-pass').value = n.mqtt_password || '';
+    document.getElementById('net-prefix').value = n.mqtt_topic_prefix || '';
+  } catch (e) { /* none yet */ }
+}
+
+document.getElementById('btn-reload-net').addEventListener('click', loadNet);
+
+document.getElementById('net-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    mqtt_broker: document.getElementById('net-broker').value.trim(),
+    mqtt_username: document.getElementById('net-user').value.trim(),
+    mqtt_password: document.getElementById('net-pass').value,
+    mqtt_topic_prefix: document.getElementById('net-prefix').value.trim()
+  };
+  try { await api('/api/network', { method: 'PUT', body: JSON.stringify(body) });
+        toast('Saved — reboot to apply'); }
+  catch (err) { toast('Save failed: ' + err.message, 'err'); }
+});
+
+/* ---------- node identity ---------- */
+document.getElementById('node-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('sys-name').value.trim(),
+    device_id: document.getElementById('sys-id').value.trim()
+  };
+  try { await api('/api/node', { method: 'PUT', body: JSON.stringify(body) });
+        toast('Saved — reboot to apply'); loadNode(); }
+  catch (err) { toast('Save failed: ' + err.message, 'err'); }
+});
+
+/* ---------- OTA ---------- */
+let otaTimer = null;
+
+async function loadOta() {
+  let st;
+  try { st = await api('/api/ota/status'); } catch (e) { return; }
+
+  document.getElementById('ota-ver').textContent = st.running_version || '-';
+  document.getElementById('ota-state').textContent = st.state || 'IDLE';
+  document.getElementById('ota-prog').textContent = (st.progress || 0) + '%';
+  document.getElementById('ota-bytes').textContent =
+    fmtBytes(st.bytes_read || 0) + (st.total_size > 0 ? ' / ' + fmtBytes(st.total_size) : '');
+  document.getElementById('ota-bar').style.width = (st.progress || 0) + '%';
+  document.getElementById('ota-err').textContent = st.error || '';
+  document.getElementById('ota-url').value = document.getElementById('ota-url').value || st.url || '';
+
+  const running = !!st.running;
+  document.getElementById('btn-ota-start').disabled = running;
+  document.getElementById('btn-ota-cancel').disabled = !running;
+
+  if (st.state === 'FAILED') document.getElementById('ota-state').className = 'val';
+}
+
+document.getElementById('btn-ota-start').addEventListener('click', async () => {
+  const url = document.getElementById('ota-url').value.trim();
+  if (!url) { toast('Patch URL required', 'warn'); return; }
+  if (!confirm('Start update from:\n' + url + '\n\nThe device reboots when finished.')) return;
+  try { await api('/api/ota/start', { method: 'POST', body: JSON.stringify({ url }) });
+        toast('Update started'); }
+  catch (e) { toast('Start failed: ' + e.message, 'err'); }
+});
+
+document.getElementById('btn-ota-cancel').addEventListener('click', async () => {
+  try { await api('/api/ota/cancel', { method: 'POST' }); toast('Cancelling…', 'warn'); }
+  catch (e) { toast(e.message, 'err'); }
+});
+
+/* ---------- system ---------- */
+async function loadCert() {
+  try {
+    const c = await api('/api/certs/info');
+    document.getElementById('cert-info').innerHTML =
+      `valid: <b>${c.valid}</b> · subject: <b>${esc(c.device || '-')}</b> · ` +
+      `algorithm: <b>${esc(c.algorithm || '-')}</b> · source: <b>${esc(c.source || '-')}</b>`;
+  } catch (e) { document.getElementById('cert-info').textContent = 'unavailable'; }
+}
+
+document.getElementById('btn-reload-dev').addEventListener('click', async () => {
+  try { await api('/api/devices/reload', { method: 'POST' }); toast('Devices reloaded'); refresh(); }
+  catch (e) { toast(e.message, 'err'); }
+});
+
+document.getElementById('btn-reboot').addEventListener('click', async () => {
+  if (!confirm('Reboot the device?')) return;
+  try { await api('/api/system/reboot', { method: 'POST' }); toast('Rebooting…', 'warn'); }
+  catch (e) { /* connection drops expected */ }
+});
+
+document.getElementById('btn-testmode').addEventListener('click', async () => {
+  if (!confirm('Reboot into manufacturing test mode?\n\nWi-Fi/MQTT stop and the\nUART self-test console starts.')) return;
+  try { await api('/api/system/testmode', { method: 'POST' }); toast('Entering test mode…', 'warn'); }
+  catch (e) { /* connection drops expected */ }
+});
+
+/* ---------- init ---------- */
+async function refresh() {
+  try { await loadNode(); } catch (e) { /* ignore */ }
+  try { await loadDevices(); } catch (e) { /* ignore */ }
+  try { await loadLive(); } catch (e) { /* ignore */ }
+}
+
+async function init() {
+  try { TYPES = await api('/api/device-types'); } catch (e) { TYPES = []; }
+  await refresh();
+  loadSys(); loadNet(); loadOta(); loadCert();
+  setInterval(loadLive, 5000);
+  setInterval(loadSys, 10000);
+  setInterval(loadOta, 1500);
+}
+init();
+</script>
+</body>
+</html>

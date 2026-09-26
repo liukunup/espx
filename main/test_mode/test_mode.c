@@ -14,6 +14,7 @@
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_system.h>
+#include <nvs.h>
 #include <nvs_flash.h>
 #include <cJSON.h>
 
@@ -29,12 +30,84 @@ static const char *TAG = "test_mode";
 
 #define CONSOLE_LINE_MAX 256
 
+/* NVS flag namespace/key (shared with node_config namespace) */
+#define TM_NVS_NAMESPACE   "espx_node"
+#define TM_NVS_KEY_REQUEST "test_request"
+
+/* ============================================
+ * Test-mode request flag
+ * ============================================ */
+
+esp_err_t test_mode_request(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(TM_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_u8(nvs, TM_NVS_KEY_REQUEST, 1);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "Test mode requested for next boot");
+    }
+    return err;
+}
+
+esp_err_t test_mode_clear_request(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(TM_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_erase_key(nvs, TM_NVS_KEY_REQUEST);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+static bool take_request_flag(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(TM_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+
+    uint8_t flag = 0;
+    esp_err_t err = nvs_get_u8(nvs, TM_NVS_KEY_REQUEST, &flag);
+    nvs_close(nvs);
+
+    if (err != ESP_OK || flag == 0) {
+        return false;
+    }
+
+    test_mode_clear_request();
+    return true;
+}
+
 /* ============================================
  * Trigger
  * ============================================ */
 
 esp_err_t test_mode_check_trigger(void)
 {
+    if (take_request_flag()) {
+        ESP_LOGW(TAG, "Test mode requested via NVS flag");
+        return ESP_OK;
+    }
+
+#if TEST_MODE_GPIO >= 0
     gpio_config_t io = {
         .pin_bit_mask = (1ULL << TEST_MODE_GPIO),
         .mode = GPIO_MODE_INPUT,
@@ -47,9 +120,70 @@ esp_err_t test_mode_check_trigger(void)
     vTaskDelay(pdMS_TO_TICKS(50));  /* debounce */
 
     int level = gpio_get_level((gpio_num_t)TEST_MODE_GPIO);
-    ESP_LOGI(TAG, "Test mode trigger GPIO%d level=%d", TEST_MODE_GPIO, level);
+    ESP_LOGI(TAG, "Test-mode trigger GPIO%d level=%d", TEST_MODE_GPIO, level);
 
-    return (level == 0) ? ESP_OK : ESP_FAIL;
+    if (level == 0) {
+        return ESP_OK;
+    }
+#else
+    ESP_LOGI(TAG, "Test-mode trigger GPIO disabled (set CONFIG_MFG_TEST_GPIO)");
+#endif
+
+    return ESP_FAIL;
+}
+
+/* ============================================
+ * Long-press watchdog
+ * ============================================ */
+
+static void longpress_task(void *arg)
+{
+    const gpio_num_t btn = (gpio_num_t)TEST_MODE_BOOT_GPIO;
+    bool triggered = false;
+
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << btn),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+
+    int held_ms = 0;
+
+    while (1) {
+        if (!triggered && gpio_get_level(btn) == 0) {
+            held_ms += 100;
+            if (held_ms >= TEST_MODE_LONGPRESS_MS) {
+                triggered = true;
+                ESP_LOGW(TAG, "BOOT held %d ms -> entering test mode", held_ms);
+                test_mode_request();
+                vTaskDelay(pdMS_TO_TICKS(250));
+                esp_restart();
+            }
+        } else if (!triggered) {
+            held_ms = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+esp_err_t test_mode_start_longpress_watchdog(void)
+{
+    if (TEST_MODE_BOOT_GPIO < 0) {
+        return ESP_OK;
+    }
+
+    BaseType_t ok = xTaskCreate(longpress_task, "tm_longpress", 3072, NULL, 2, NULL);
+    if (ok != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start long-press watchdog");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Hold BOOT (GPIO%d) for %d ms to enter test mode",
+             TEST_MODE_BOOT_GPIO, TEST_MODE_LONGPRESS_MS);
+    return ESP_OK;
 }
 
 /* ============================================
@@ -79,23 +213,24 @@ static void print_help(void)
 
 static void cmd_types(void)
 {
-    size_t count = 0;
-    const device_type_t *types = device_type_get_all(&count);
-
     printf("\n%-16s %-40s %s\n", "TYPE", "DESCRIPTION", "CAPS");
     printf("--------------------------------------------------------------------------------\n");
-    for (size_t i = 0; i < count; i++) {
-        char caps[32] = "";
-        if (types[i].capabilities & DEVICE_CAPABILITY_READ)    strcat(caps, "R");
-        if (types[i].capabilities & DEVICE_CAPABILITY_WRITE)   strcat(caps, "W");
-        if (types[i].capabilities & DEVICE_CAPABILITY_NOTIFY)  strcat(caps, "N");
-        if (types[i].capabilities & DEVICE_CAPABILITY_PERIODIC) strcat(caps, "P");
 
-        printf("%-16s %-40s %s\n", types[i].name, types[i].description, caps);
+    for (size_t i = 0; i < device_type_count(); i++) {
+        const device_type_t *t = device_type_get_by_index(i);
+        if (t == NULL) continue;
+
+        char caps[32] = "";
+        if (t->capabilities & DEVICE_CAPABILITY_READ)     strcat(caps, "R");
+        if (t->capabilities & DEVICE_CAPABILITY_WRITE)    strcat(caps, "W");
+        if (t->capabilities & DEVICE_CAPABILITY_NOTIFY)   strcat(caps, "N");
+        if (t->capabilities & DEVICE_CAPABILITY_PERIODIC) strcat(caps, "P");
+
+        printf("%-16s %-40s %s\n", t->name, t->description, caps);
 
         cJSON *cfg = cJSON_CreateObject();
-        if (types[i].get_default_config) {
-            types[i].get_default_config(cfg);
+        if (t->get_default_config) {
+            t->get_default_config(cfg);
         }
         char *s = cJSON_PrintUnformatted(cfg);
         printf("%-16s default: %s\n", "", s ? s : "{}");
@@ -107,18 +242,18 @@ static void cmd_types(void)
 
 static void cmd_list(void)
 {
-    size_t count;
-    const device_t *devices = device_get_all(&count);
+    printf("\n%-20s %-16s %-6s %-8s\n", "ID", "TYPE", "EN", "INIT");
+    printf("------------------------------------------------------------------------\n");
 
-    printf("\n%-20s %-14s %-6s %-8s\n", "ID", "TYPE", "EN", "INIT");
-    printf("--------------------------------------------------------\n");
-    for (size_t i = 0; i < count; i++) {
-        printf("%-20s %-14s %-6s %-8s\n",
-               devices[i].id, devices[i].type->name,
-               devices[i].enabled ? "yes" : "no",
-               devices[i].initialized ? "yes" : "no");
+    for (size_t i = 0; i < device_get_count(); i++) {
+        const device_t *dev = device_get_by_index(i);
+        if (dev == NULL) continue;
+        printf("%-20s %-16s %-6s %-8s\n",
+               dev->id, dev->type->name,
+               dev->enabled ? "yes" : "no",
+               dev->initialized ? "yes" : "no");
     }
-    printf("\n%d device(s)\n\n", (int)count);
+    printf("\n%d device(s)\n\n", (int)device_get_count());
 }
 
 static void cmd_add(char *args)
@@ -355,10 +490,9 @@ static void cmd_test(char *args)
         }
         test_one_device(dev);
     } else {
-        size_t count;
-        const device_t *devices = device_get_all(&count);
-        for (size_t i = 0; i < count; i++) {
-            test_one_device(&devices[i]);
+        for (size_t i = 0; i < device_get_count(); i++) {
+            const device_t *dev = device_get_by_index(i);
+            if (dev) test_one_device(dev);
         }
     }
 
@@ -377,21 +511,19 @@ static void cmd_reset(void)
 {
     printf("Erasing device configuration...\n");
 
-    size_t count;
-    const device_t *devices = device_get_all(&count);
-
-    /* Remove from the end to avoid index shifting issues */
+    /* Remove from the end: device_remove() shifts the index array. */
     while (device_get_count() > 0) {
-        const device_t *dev = device_get_all(&count);
-        if (count == 0) break;
-        char id[32];
-        strncpy(id, dev[count - 1].id, sizeof(id) - 1);
+        const device_t *dev = device_get_by_index(device_get_count() - 1);
+        if (dev == NULL) break;
+
+        char id[sizeof(dev->id)];
+        strncpy(id, dev->id, sizeof(id) - 1);
         id[sizeof(id) - 1] = '\0';
         device_remove(id);
     }
 
     device_manager_save();
-    printf("Done. 0 devices remain.\n");
+    printf("Done. %d device(s) remain.\n", (int)device_get_count());
 }
 
 static void cmd_mfg(char *args)
@@ -422,6 +554,42 @@ static void cmd_mfg(char *args)
     } else {
         printf("Unknown mfg subcommand: %s\n", sub);
     }
+}
+
+/**
+ * @brief Read one line from the console
+ *
+ * Accumulates characters explicitly instead of using fgets(): the ESP-IDF
+ * console VFS may return short reads, in which case fgets() hands back a
+ * partial line and each character is treated as its own command.
+ *
+ * @return true when a complete line was assembled (without the newline)
+ */
+static bool console_read_line(char *line, size_t max)
+{
+    static size_t pos = 0;
+    int c;
+
+    while ((c = fgetc(stdin)) != EOF) {
+        if (c == '\r') {
+            continue;                       /* ignore CR (CRLF terminals) */
+        }
+        if (c == '\n') {
+            line[pos] = '\0';
+            pos = 0;
+            return true;
+        }
+        if (c == 0x08 || c == 0x7F) {       /* backspace / delete */
+            if (pos > 0) pos--;
+            continue;
+        }
+        if (pos < max - 1) {
+            line[pos++] = (char)c;
+        }
+    }
+
+    /* No data available yet: fall back to the caller's poll delay. */
+    return false;
 }
 
 /* ============================================
@@ -465,18 +633,12 @@ void test_mode_enter(void)
         printf("espx-test> ");
         fflush(stdout);
 
-        if (fgets(line, sizeof(line), stdin) == NULL) {
-            vTaskDelay(pdMS_TO_TICKS(20));
+        if (!console_read_line(line, sizeof(line))) {
+            vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
-        /* Strip trailing newline / CR */
-        size_t len = strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-            line[--len] = '\0';
-        }
-
-        if (len == 0) {
+        if (line[0] == '\0') {
             continue;
         }
 

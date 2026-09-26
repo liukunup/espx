@@ -4,14 +4,16 @@
  */
 
 #include <string.h>
-#include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 #include "led_driver.h"
 #include "led_strip.h"
 
+static const char *TAG = "led_driver";
+
 #ifndef CONFIG_LED_GPIO
-#define CONFIG_LED_GPIO 48
+#define CONFIG_LED_GPIO -1
 #endif
 
 #ifndef CONFIG_LED_STRIP_LENGTH
@@ -23,6 +25,14 @@ static bool g_initialized = false;
 
 static TaskHandle_t g_blink_task = NULL;
 static volatile bool g_blink_running = false;
+
+/**
+ * @brief Whether the status LED is enabled on this board
+ */
+static inline bool led_enabled(void)
+{
+    return CONFIG_LED_GPIO >= 0;
+}
 
 static void blink_task(void *pvParameters)
 {
@@ -56,6 +66,13 @@ esp_err_t led_driver_init(void)
         return ESP_OK;
     }
 
+    if (!led_enabled()) {
+        ESP_LOGI(TAG, "Status LED disabled (CONFIG_LED_GPIO < 0)");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Status LED on GPIO%d", CONFIG_LED_GPIO);
+
     led_strip_config_t strip_config = {
         .strip_gpio_num = CONFIG_LED_GPIO,
         .max_leds = CONFIG_LED_STRIP_LENGTH,
@@ -84,6 +101,7 @@ esp_err_t led_driver_init(void)
 
 esp_err_t led_set_color(uint8_t r, uint8_t g, uint8_t b)
 {
+    if (!led_enabled()) return ESP_OK;
     if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -106,6 +124,7 @@ esp_err_t led_set_brightness(uint8_t brightness)
 
 esp_err_t led_set_pattern(led_pattern_t pattern, uint32_t period)
 {
+    if (!led_enabled()) return ESP_OK;
     if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -150,6 +169,7 @@ esp_err_t led_set_pattern(led_pattern_t pattern, uint32_t period)
 
 esp_err_t led_stop_pattern(void)
 {
+    if (!led_enabled()) return ESP_OK;
     if (!g_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -167,6 +187,7 @@ esp_err_t led_stop_pattern(void)
 
 esp_err_t led_set_status(const char *status)
 {
+    if (!led_enabled()) return ESP_OK;
     if (!g_initialized || g_led_strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }

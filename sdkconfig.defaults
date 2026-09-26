@@ -1,24 +1,52 @@
-# ESPX Configuration
+# ============================================================
+# ESPX firmware defaults  (ESP32-S3 R16N8 = 16MB flash, 8MB PSRAM)
+# ============================================================
+
+# --- Target (pins the chip so a deleted sdkconfig cannot reset it) ---
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- ESPX ---
 CONFIG_ESPX=y
 CONFIG_DEVICE_NAME="ESPX"
 CONFIG_FIRMWARE_VERSION="1.0.0"
-CONFIG_MFG_TEST_GPIO=0
-CONFIG_LED_GPIO=48
+CONFIG_MFG_TEST_GPIO=-1
+CONFIG_LED_GPIO=-1
 CONFIG_LED_STRIP_LENGTH=1
 
-# Flash Size - ESP32-S3 R16N8 typically has 8MB
-CONFIG_ESPTOOLPY_FLASH_SIZE="8MB"
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# --- Flash: 16 MB ---
+CONFIG_ESPTOOLPY_FLASH_SIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# BT enabled
+# --- PSRAM: 8 MB octal on the R16N8 module ---
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# --- Bluetooth (Wi-Fi provisioning BLE transport) ---
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 
-# Partition Table
+# --- Partition table ---
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 
-# HTTPS Server
+# --- HTTPS server (embedded IDF component) ---
 CONFIG_ESP_HTTPS_SERVER_ENABLE=y
-CONFIG_HTTPS_SERVER_PORT=443
+
+# --- TLS: keep the cert bundle for HTTPS OTA from public servers ---
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+
+# --- Wi-Fi provisioning defaults (security v2) ---
+CONFIG_EXAMPLE_PROV_SECURITY_VERSION_2=y
+CONFIG_EXAMPLE_PROV_SEC2_DEV_MODE=y
+
+# --- OTA rollback: allow rollback on boot failure ---
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- Log level: INFO (use DEBUG for bring-up) ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
