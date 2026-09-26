@@ -3,6 +3,7 @@
  * @brief TJA1050 CAN (TWAI) transceiver driver
  *
  * Uses ESP-IDF v6.x esp_twai.h driver (new on-chip TWAI driver).
+ * RX is ISR-driven via on_rx_done callback + FreeRTOS queue.
  * Device type name: "can"
  */
 
@@ -12,6 +13,8 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <cJSON.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 #include <esp_twai.h>
 #include <esp_twai_onchip.h>
@@ -22,8 +25,8 @@
 
 static const char *TAG = "tja1050";
 
-/* RX ring buffer size */
 #define TJA1050_RX_BUF_SIZE  16
+#define TJA1050_FRAME_SIZE   64   /* max CAN FD data bytes, classic CAN uses ≤8 */
 
 typedef struct {
     twai_node_handle_t node;
@@ -31,18 +34,53 @@ typedef struct {
     gpio_num_t rx_gpio;
     uint32_t bitrate;
     int tx_queue_size;
-    /* Ring buffer for received frames */
-    twai_frame_t rx_buf[TJA1050_RX_BUF_SIZE];
-    int rx_head;   /* next write slot */
-    int rx_tail;   /* next read slot */
-    int rx_count;  /* number of frames in buffer */
+    QueueHandle_t rx_queue;       /* QueueHandle_t for received frames */
     bool initialized;
 } tja1050_data_t;
 
-/* Lock for rx buffer (accessed from tick in shared task) */
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
+/* ISR callback: copies received frame into FreeRTOS queue */
+static bool tja1050_on_rx_done(twai_node_handle_t node,
+                                 const twai_rx_done_event_data_t *edata,
+                                 void *user_ctx)
+{
+    (void)node;
+    (void)edata;
+    tja1050_data_t *data = user_ctx;
+    if (!data || !data->rx_queue) return false;
+
+    twai_frame_t rx_frame;
+    rx_frame.buffer = malloc(TJA1050_FRAME_SIZE);
+    if (!rx_frame.buffer) return false;
+    rx_frame.buffer_len = TJA1050_FRAME_SIZE;
+
+    /* Receive the actual frame (called from ISR context) */
+    esp_err_t err = twai_node_receive_from_isr(node, &rx_frame);
+    if (err == ESP_OK) {
+        /* Try to copy header and data into a fixed-size struct for the queue */
+        /* We allocate our own buffer to hold data since twai_frame_t borrows our malloc'd buffer */
+        uint8_t *buf = malloc(TJA1050_FRAME_SIZE);
+        if (buf) {
+            size_t copy_len = rx_frame.header.dlc < TJA1050_FRAME_SIZE
+                              ? rx_frame.header.dlc : TJA1050_FRAME_SIZE;
+            memcpy(buf, rx_frame.buffer, copy_len);
+            twai_frame_t *q_frame = malloc(sizeof(twai_frame_t));
+            if (q_frame) {
+                q_frame->header = rx_frame.header;
+                q_frame->buffer = buf;
+                q_frame->buffer_len = copy_len;
+                q_frame->tx_queue_priority = 0;
+                BaseType_t higher_priority_task_woken = pdFALSE;
+                xQueueSendFromISR(data->rx_queue, &q_frame, &higher_priority_task_woken);
+                return higher_priority_task_woken == pdTRUE;
+            }
+            free(buf);
+        }
+        free(rx_frame.buffer);
+    } else {
+        free(rx_frame.buffer);
+    }
+    return false;
+}
 
 static esp_err_t tja1050_init(device_t *dev, const cJSON *config)
 {
@@ -62,16 +100,23 @@ static esp_err_t tja1050_init(device_t *dev, const cJSON *config)
     data->bitrate = 500000;
     data->tx_queue_size = 5;
 
-    cJSON *br = cJSON_GetObjectItem(config, "bitrate");
+    cJSON *br  = cJSON_GetObjectItem(config, "bitrate");
     cJSON *txq = cJSON_GetObjectItem(config, "tx_queue_size");
     if (cJSON_IsNumber(br))  data->bitrate = (uint32_t)br->valueint;
     if (cJSON_IsNumber(txq)) data->tx_queue_size = txq->valueint;
+
+    /* Create queue before registering callbacks */
+    data->rx_queue = xQueueCreate(TJA1050_RX_BUF_SIZE, sizeof(twai_frame_t *));
+    if (!data->rx_queue) {
+        free(data);
+        return ESP_ERR_NO_MEM;
+    }
 
     twai_onchip_node_config_t node_cfg = {
         .io_cfg.tx = data->tx_gpio,
         .io_cfg.rx = data->rx_gpio,
         .bit_timing.bitrate = data->bitrate,
-        .bit_timing.sp_permill = 0,  /* use default ~80% */
+        .bit_timing.sp_permill = 0,  /* use default ~80% sampling point */
         .tx_queue_depth = (uint32_t)data->tx_queue_size,
         .intr_priority = 0,
     };
@@ -79,14 +124,26 @@ static esp_err_t tja1050_init(device_t *dev, const cJSON *config)
     esp_err_t err = twai_new_node_onchip(&node_cfg, &data->node);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "twai_new_node_onchip failed: %s", esp_err_to_name(err));
+        vQueueDelete(data->rx_queue);
         free(data);
         return err;
+    }
+
+    /* Register RX callback */
+    twai_event_callbacks_t cbs = {
+        .on_rx_done = tja1050_on_rx_done,
+    };
+    err = twai_node_register_event_callbacks(data->node, &cbs, data);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "twai_node_register_event_callbacks failed: %s", esp_err_to_name(err));
+        /* Non-fatal — RX will be unavailable but TX still works */
     }
 
     err = twai_node_enable(data->node);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "twai_node_enable failed: %s", esp_err_to_name(err));
         twai_node_delete(data->node);
+        vQueueDelete(data->rx_queue);
         free(data);
         return err;
     }
@@ -108,6 +165,15 @@ static esp_err_t tja1050_deinit(device_t *dev)
         twai_node_delete(data->node);
         data->initialized = false;
     }
+    if (data->rx_queue) {
+        /* Drain and free queued frames */
+        twai_frame_t *f;
+        while (xQueueReceive(data->rx_queue, &f, 0) == pdTRUE) {
+            free(f->buffer);
+            free(f);
+        }
+        vQueueDelete(data->rx_queue);
+    }
     free(data);
     dev->driver_data = NULL;
     return ESP_OK;
@@ -118,9 +184,8 @@ static esp_err_t tja1050_read(device_t *dev, cJSON *value)
     tja1050_data_t *data = dev->driver_data;
     if (!data) return ESP_ERR_INVALID_STATE;
 
-    portENTER_CRITICAL(&s_spinlock);
-    if (data->rx_count > 0) {
-        twai_frame_t *f = &data->rx_buf[data->rx_tail];
+    twai_frame_t *f = NULL;
+    if (xQueueReceive(data->rx_queue, &f, 0) == pdTRUE && f != NULL) {
         cJSON_AddNumberToObject(value, "id", f->header.id);
         cJSON_AddBoolToObject(value, "ext", f->header.ide);
         cJSON_AddBoolToObject(value, "rtr", f->header.rtr);
@@ -128,16 +193,14 @@ static esp_err_t tja1050_read(device_t *dev, cJSON *value)
         cJSON_AddNumberToObject(value, "timestamp", (double)f->header.timestamp);
 
         cJSON *arr = cJSON_CreateArray();
-        for (int i = 0; i < f->header.dlc && i < (int)f->buffer_len; i++) {
+        for (int i = 0; i < (int)f->buffer_len; i++) {
             cJSON_AddItemToArray(arr, cJSON_CreateNumber(f->buffer[i]));
         }
         cJSON_AddItemToObject(value, "data", arr);
 
-        data->rx_tail = (data->rx_tail + 1) % TJA1050_RX_BUF_SIZE;
-        data->rx_count--;
+        free(f->buffer);
+        free(f);
     }
-    portEXIT_CRITICAL(&s_spinlock);
-
     return ESP_OK;
 }
 
@@ -146,7 +209,7 @@ static esp_err_t tja1050_write(device_t *dev, const cJSON *value)
     tja1050_data_t *data = dev->driver_data;
     if (!data || !data->initialized) return ESP_ERR_INVALID_STATE;
 
-    cJSON *id_n  = cJSON_GetObjectItem(value, "id");
+    cJSON *id_n   = cJSON_GetObjectItem(value, "id");
     cJSON *data_n = cJSON_GetObjectItem(value, "data");
     cJSON *ext_n  = cJSON_GetObjectItem(value, "ext");
     cJSON *rtr_n  = cJSON_GetObjectItem(value, "rtr");
@@ -166,10 +229,10 @@ static esp_err_t tja1050_write(device_t *dev, const cJSON *value)
     }
 
     twai_frame_header_t hdr = {
-        .id = (uint32_t)id_n->valueint,
-        .dlc = (uint16_t)dlc,
-        .ide = cJSON_IsTrue(ext_n) ? 1 : 0,
-        .rtr = cJSON_IsTrue(rtr_n) ? 1 : 0,
+        .id   = (uint32_t)id_n->valueint,
+        .dlc  = (uint16_t)dlc,
+        .ide  = cJSON_IsTrue(ext_n) ? 1 : 0,
+        .rtr  = cJSON_IsTrue(rtr_n) ? 1 : 0,
     };
 
     twai_frame_t frame = {
@@ -190,36 +253,8 @@ static esp_err_t tja1050_tick(device_t *dev)
 {
     tja1050_data_t *data = dev->driver_data;
     if (!data || !data->initialized) return ESP_OK;
-
-    twai_frame_t rx_frame;
-    rx_frame.buffer = malloc(64);
-    if (!rx_frame.buffer) return ESP_OK;
-    rx_frame.buffer_len = 64;
-
-    /* Poll for received frames */
-    while (twai_node_receive_from_isr(data->node, &rx_frame) == ESP_OK) {
-        portENTER_CRITICAL(&s_spinlock);
-        if (data->rx_count < TJA1050_RX_BUF_SIZE) {
-            /* Copy frame into ring buffer (buffer pointer replaced with our own) */
-            data->rx_buf[data->rx_head] = rx_frame;
-            /* Copy data into buffer since the frame borrows our allocated buffer */
-            memcpy(data->rx_buf[data->rx_head].buffer,
-                   rx_frame.buffer, rx_frame.header.dlc);
-            data->rx_buf[data->rx_head].buffer_len = rx_frame.header.dlc;
-            data->rx_head = (data->rx_head + 1) % TJA1050_RX_BUF_SIZE;
-            data->rx_count++;
-            /* Allocate a new buffer for the next potential frame */
-            rx_frame.buffer = malloc(64);
-            if (!rx_frame.buffer) break;
-            rx_frame.buffer_len = 64;
-        }
-        portEXIT_CRITICAL(&s_spinlock);
-
-        ESP_LOGD(TAG, "RX id=0x%lX dlc=%u", (unsigned long)rx_frame.header.id,
-                 (unsigned)rx_frame.header.dlc);
-    }
-
-    free(rx_frame.buffer);
+    /* Frames arrive via ISR callback; tick just drains the queue.
+     * Invalidate any stale entries by draining the queue during read(). */
     return ESP_OK;
 }
 
