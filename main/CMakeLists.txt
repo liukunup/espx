@@ -27,6 +27,11 @@ set(espx_sources
     # Peripheral drivers
     "peripherals/peripherals.c"
     "peripherals/esp_idf_i2c.c"
+    "peripherals/tja1050.c"
+    "peripherals/mcp4725.c"
+    "peripherals/ads1115.c"
+    "peripherals/ina226.c"
+    "peripherals/buzzer.c"
     "peripherals/dht11.c"
     "peripherals/button.c"
     "peripherals/relay.c"
