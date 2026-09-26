@@ -28,13 +28,15 @@ static cJSON *g_config = NULL;
 
 esp_err_t node_config_init(void)
 {
-    // Generate default device id from MAC
+    // Generate default device id from MAC (lowercase)
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    snprintf(g_device_id, sizeof(g_device_id), "espx-%02X%02X%02X%02X%02X%02X",
+    snprintf(g_device_id, sizeof(g_device_id), "espx-%02x%02x%02x%02x%02x%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    strncpy(g_name, "ESPX Node", sizeof(g_name) - 1);
+    // Default name: Node-{last 6 of mac, uppercase} e.g. Node-772E74
+    snprintf(g_name, sizeof(g_name), "Node-%02X%02X%02X",
+             mac[3], mac[4], mac[5]);
 
     ESP_LOGI(TAG, "Node config initialized, device_id: %s", g_device_id);
     return ESP_OK;

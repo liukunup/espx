@@ -191,39 +191,60 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Form 1: {"all": {"r":..,"g":..,"b":..}}
+    // Simple form: {"r": 255, "g": 0, "b": 128, "brightness": 128}
+    // Sets all pixels to the same color with optional brightness
+    cJSON *r = cJSON_GetObjectItem(value, "r");
+    cJSON *g = cJSON_GetObjectItem(value, "g");
+    cJSON *b = cJSON_GetObjectItem(value, "b");
+    cJSON *brightness = cJSON_GetObjectItem(value, "brightness");
+    if (cJSON_IsNumber(r) && cJSON_IsNumber(g) && cJSON_IsNumber(b)) {
+        uint8_t rv = (uint8_t)r->valueint;
+        uint8_t gv = (uint8_t)g->valueint;
+        uint8_t bv = (uint8_t)b->valueint;
+        for (int i = 0; i < data->count; i++) {
+            data->r_buf[i] = rv;
+            data->g_buf[i] = gv;
+            data->b_buf[i] = bv;
+        }
+        if (cJSON_IsNumber(brightness)) {
+            data->brightness = brightness->valueint;
+        }
+        return apply_pixels(data);
+    }
+
+    // Form 2: {"all": {"r":..,"g":..,"b":..}}
     cJSON *all = cJSON_GetObjectItem(value, "all");
     if (cJSON_IsObject(all)) {
-        cJSON *r = cJSON_GetObjectItem(all, "r");
-        cJSON *g = cJSON_GetObjectItem(all, "g");
-        cJSON *b = cJSON_GetObjectItem(all, "b");
-        if (cJSON_IsNumber(r) && cJSON_IsNumber(g) && cJSON_IsNumber(b)) {
+        cJSON *r2 = cJSON_GetObjectItem(all, "r");
+        cJSON *g2 = cJSON_GetObjectItem(all, "g");
+        cJSON *b2 = cJSON_GetObjectItem(all, "b");
+        if (cJSON_IsNumber(r2) && cJSON_IsNumber(g2) && cJSON_IsNumber(b2)) {
             for (int i = 0; i < data->count; i++) {
-                data->r_buf[i] = (uint8_t)r->valueint;
-                data->g_buf[i] = (uint8_t)g->valueint;
-                data->b_buf[i] = (uint8_t)b->valueint;
+                data->r_buf[i] = (uint8_t)r2->valueint;
+                data->g_buf[i] = (uint8_t)g2->valueint;
+                data->b_buf[i] = (uint8_t)b2->valueint;
             }
             return apply_pixels(data);
         }
     }
 
-    // Form 2: {"index": 0, "r":..,"g":..,"b":..}
+    // Form 3: {"index": 0, "r":..,"g":..,"b":..}
     cJSON *index = cJSON_GetObjectItem(value, "index");
-    cJSON *r = cJSON_GetObjectItem(value, "r");
-    cJSON *g = cJSON_GetObjectItem(value, "g");
-    cJSON *b = cJSON_GetObjectItem(value, "b");
-    if (cJSON_IsNumber(index) && cJSON_IsNumber(r) && cJSON_IsNumber(g) && cJSON_IsNumber(b)) {
+    cJSON *r3 = cJSON_GetObjectItem(value, "r");
+    cJSON *g3 = cJSON_GetObjectItem(value, "g");
+    cJSON *b3 = cJSON_GetObjectItem(value, "b");
+    if (cJSON_IsNumber(index) && cJSON_IsNumber(r3) && cJSON_IsNumber(g3) && cJSON_IsNumber(b3)) {
         int idx = index->valueint;
         if (idx < 0 || idx >= data->count) {
             return ESP_ERR_INVALID_ARG;
         }
-        data->r_buf[idx] = (uint8_t)r->valueint;
-        data->g_buf[idx] = (uint8_t)g->valueint;
-        data->b_buf[idx] = (uint8_t)b->valueint;
+        data->r_buf[idx] = (uint8_t)r3->valueint;
+        data->g_buf[idx] = (uint8_t)g3->valueint;
+        data->b_buf[idx] = (uint8_t)b3->valueint;
         return apply_pixels(data);
     }
 
-    // Form 3: {"pixels": [{"r":..,"g":..,"b":..}, ...]}
+    // Form 4: {"pixels": [{"r":..,"g":..,"b":..}, ...]}
     cJSON *pixels = cJSON_GetObjectItem(value, "pixels");
     if (cJSON_IsArray(pixels)) {
         int idx = 0;

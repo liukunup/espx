@@ -18,6 +18,7 @@
 #include <esp_netif.h>
 #include <esp_https_server.h>
 #include <esp_http_server.h>
+#include <nvs_flash.h>
 #include <cJSON.h>
 
 #include "app_info.h"
@@ -707,6 +708,35 @@ static esp_err_t api_system_testmode_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief Helper: convert auth mode to string
+ */
+static const char* wifi_auth_mode_str(wifi_auth_mode_t mode)
+{
+    switch (mode) {
+        case WIFI_AUTH_OPEN:            return "Open";
+        case WIFI_AUTH_WEP:             return "WEP";
+        case WIFI_AUTH_WPA_PSK:         return "WPA-PSK";
+        case WIFI_AUTH_WPA2_PSK:        return "WPA2-PSK";
+        case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2-PSK";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Enterprise";
+        case WIFI_AUTH_WPA3_PSK:        return "WPA3-PSK";
+        case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3-PSK";
+        default:                        return "Unknown";
+    }
+}
+
+/**
+ * @brief Helper: convert MAC address to string
+ */
+static char* mac_to_str(uint8_t *mac)
+{
+    static char buf[18];
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return buf;
+}
+
+/**
  * @brief POST /api/system/reboot
  */
 static esp_err_t api_system_reboot_handler(httpd_req_t *req)
@@ -716,6 +746,101 @@ static esp_err_t api_system_reboot_handler(httpd_req_t *req)
     send_json(req, resp, 200);
 
     vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
+    return ESP_OK;
+}
+
+/**
+ * @brief POST /api/wifi/scan - scan for Wi-Fi networks
+ */
+static esp_err_t api_wifi_scan_handler(httpd_req_t *req)
+{
+    wifi_scan_config_t scan_config = { .show_hidden = false };
+    esp_err_t err = esp_wifi_scan_start(&scan_config, true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi scan failed: %s", esp_err_to_name(err));
+        return send_error(req, "Scan failed", 500);
+    }
+
+    uint16_t ap_num = 0;
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_num));
+
+    if (ap_num == 0) {
+        cJSON *json = cJSON_CreateObject();
+        cJSON_AddArrayToObject(json, "networks");
+        return send_json(req, json, 200);
+    }
+
+    if (ap_num > 32) ap_num = 32;
+    wifi_ap_record_t *ap_info = malloc(sizeof(wifi_ap_record_t) * ap_num);
+    if (ap_info == NULL) {
+        return send_error(req, "Out of memory", 500);
+    }
+
+    uint16_t count = ap_num;
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&count, ap_info));
+
+    cJSON *json = cJSON_CreateObject();
+    cJSON *networks = cJSON_AddArrayToObject(json, "networks");
+
+    for (int i = 0; i < count; i++) {
+        cJSON *net = cJSON_CreateObject();
+        cJSON_AddStringToObject(net, "ssid", (const char *)ap_info[i].ssid);
+        cJSON_AddStringToObject(net, "bssid",
+            mac_to_str((uint8_t *)&ap_info[i].bssid));
+        cJSON_AddNumberToObject(net, "rssi", ap_info[i].rssi);
+        cJSON_AddStringToObject(net, "auth", wifi_auth_mode_str(ap_info[i].authmode));
+        cJSON_AddItemToArray(networks, net);
+    }
+
+    free(ap_info);
+    return send_json(req, json, 200);
+}
+
+/**
+ * @brief PUT /api/wifi/config - save Wi-Fi credentials and reboot
+ */
+static esp_err_t api_wifi_config_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (len <= 0) return send_error(req, "Empty body", 400);
+    buf[len] = '\0';
+
+    cJSON *incoming = cJSON_Parse(buf);
+    if (incoming == NULL) return send_error(req, "Invalid JSON", 400);
+
+    cJSON *ssid = cJSON_GetObjectItem(incoming, "ssid");
+    cJSON *password = cJSON_GetObjectItem(incoming, "password");
+
+    if (!cJSON_IsString(ssid) || strlen(ssid->valuestring) == 0) {
+        cJSON_Delete(incoming);
+        return send_error(req, "SSID required", 400);
+    }
+
+    // Save to NVS for Wi-Fi provisioning
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("espwifiprovisioning", NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        nvs_set_str(nvs, "ssid", ssid->valuestring);
+        if (cJSON_IsString(password) && strlen(password->valuestring) > 0) {
+            nvs_set_str(nvs, "password", password->valuestring);
+        } else {
+            nvs_erase_key(nvs, "password");
+        }
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "Wi-Fi config saved: %s", ssid->valuestring);
+    }
+
+    cJSON_Delete(incoming);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", err == ESP_OK);
+    send_json(req, resp, err == ESP_OK ? 200 : 500);
+
+    // Reboot to apply
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     return ESP_OK;
 }
@@ -739,7 +864,7 @@ esp_err_t web_server_start(void)
     config.servercert_len = server_cert.cert_len;
     config.prvtkey_pem = (uint8_t *)server_cert.key_pem;
     config.prvtkey_len = server_cert.key_len;
-    config.httpd.max_uri_handlers = 28;
+    config.httpd.max_uri_handlers = 32;
 
     /* Wildcards are NOT matched by default: with uri_match_fn == NULL the
      * server does a plain string compare, so a pattern ending in a star never
@@ -747,14 +872,10 @@ esp_err_t web_server_start(void)
      * request would 404 with the server's own "Nothing matches the given URI".
      * Selecting the wildcard matcher is what makes the dispatcher reachable. */
     config.httpd.uri_match_fn = httpd_uri_match_wildcard;
-    /* HTTP requests and WebSocket clients share this pool. Each open socket
-     * holds a full TLS session, and mbedTLS handshake state must live in
-     * INTERNAL RAM (not PSRAM). At 7 the internal pool is exhausted under a
-     * browser's parallel requests: mbedtls_ssl_setup then fails with
-     * PSA_ERROR_INSUFFICIENT_MEMORY and the server refuses every further
-     * connection until reboot. 4 comfortably covers one browser (1 WebSocket +
-     * a couple of in-flight requests). */
+    /* 4 comfortably covers one browser (1 WebSocket + a couple of in-flight requests). */
     config.httpd.max_open_sockets = 4;
+    /* Increase stack size for HTTPD task to prevent stack overflow */
+    config.httpd.stack_size = 8192;
 
     ESP_LOGI(TAG, "Starting HTTPS server...");
         err = httpd_ssl_start(&g_server, &config);
@@ -784,6 +905,8 @@ esp_err_t web_server_start(void)
         { .uri = "/api/certs/info",     .method = HTTP_GET,    .handler = api_certs_info_handler },
         { .uri = "/api/system/reboot",  .method = HTTP_POST,   .handler = api_system_reboot_handler },
         { .uri = "/api/system/testmode",.method = HTTP_POST,   .handler = api_system_testmode_handler },
+        { .uri = "/api/wifi/scan",       .method = HTTP_POST,   .handler = api_wifi_scan_handler },
+        { .uri = "/api/wifi/config",     .method = HTTP_PUT,    .handler = api_wifi_config_handler },
         // Wildcard dispatcher must be last
         { .uri = "/api/devices/*",      .method = HTTP_GET,    .handler = api_device_dispatch_handler },
         { .uri = "/api/devices/*",      .method = HTTP_POST,   .handler = api_device_dispatch_handler },
