@@ -1,0 +1,9 @@
+menu "LED Driver"
+
+    config LED_GPIO
+        int "LED GPIO Pin"
+        default 48
+        help
+            GPIO pin connected to the status LED.
+
+endmenu

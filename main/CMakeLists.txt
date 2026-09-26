@@ -5,6 +5,10 @@ set(src_dirs
     param_store
     cert_manager
     web_server
+    mqtt_client
+    ota_service
+    mfg_provision
+    test_mode
 )
 
 set(include_dirs
@@ -14,6 +18,10 @@ set(include_dirs
     param_store
     cert_manager
     web_server
+    mqtt_client
+    ota_service
+    mfg_provision
+    test_mode
 )
 
 set(requires
@@ -24,7 +32,10 @@ set(requires
     cjson
     mbedtls
     esp_https_server
-    wifi_proving
+    wifi_provisioning
+    esp_mqtt
+    esp_ota_ops
+    led_driver
 )
 
 idf_component_register(
