@@ -239,6 +239,126 @@ Then reboot and `mfg show` again — it must still be `no` (applied only once).
 
 ---
 
+## P1b — new peripheral drivers
+
+### T1.6 CAN (TJA1050) frame send and receive
+
+**Proves:** TWAI controller initialises and can transmit/receive frames.
+
+```bash
+# Add CAN device via REST
+curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' --data-binary @-
+<<'EOF'
+devices:
+  - id: can1
+    type: can
+    config: {tx_gpio: 6, rx_gpio: 7, bitrate: 500000}
+EOF
+
+# Send a frame
+curl -k -X POST https://$HOST/api/devices/can1/write -d '{"id":123,"data":[1,2,3,4]}'
+# Expect: 200 OK
+
+# Read back (queue may be empty if no peer device)
+curl -k https://$HOST/api/devices/can1
+# If a frame was received: {"id":..., "data":[...], "ext":false, "rtr":false}
+```
+
+**Expect:** device added, TX returns 200 OK, log shows `TX id=0x7B dlc=4`.
+
+---
+
+### T1.7 MCP4725 DAC write and read
+
+**Proves:** I2C DAC sets voltage correctly.
+
+```bash
+curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' --data-binary @-
+<<'EOF'
+devices:
+  - id: dac1
+    type: mcp4725
+    config: {sda_gpio: 10, scl_gpio: 11, vref_mv: 3300}
+EOF
+
+curl -k -X POST https://$HOST/api/devices/dac1/write -d '2048'
+curl -k https://$HOST/api/devices/dac1
+# Expect: {"value":2048,"voltage_mv":1650.00,"vref_mv":3300}
+```
+
+---
+
+### T1.8 ADS1115 ADC periodic reading
+
+**Proves:** I2C ADC reads voltage and publishes periodically.
+
+```bash
+curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' --data-binary @-
+<<'EOF'
+devices:
+  - id: adc1
+    type: ads1115
+    config: {sda_gpio: 10, scl_gpio: 11, channel: 0, gain: 1, interval_ms: 500}
+EOF
+
+curl -k https://$HOST/api/devices/adc1
+# Expect: {"raw":..., "mv":...}
+```
+
+**Expect:** raw value is non-zero when analog input is connected.
+
+---
+
+### T1.9 INA226 power monitor reading
+
+**Proves:** I2C power monitor reports V, I, P.
+
+```bash
+curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' --data-binary @-
+<<'EOF'
+devices:
+  - id: pwr1
+    type: ina226
+    config: {sda_gpio: 10, scl_gpio: 11, r_shunt: 10, max_current_ma: 1000, interval_ms: 500}
+EOF
+
+curl -k https://$HOST/api/devices/pwr1
+# Expect: {"bus_voltage_mv":..., "shunt_voltage_uv":..., "current_ma":..., "power_mw":...}
+```
+
+---
+
+### T1.10 Buzzer on/off and auto-off
+
+**Proves:** LEDC PWM buzzer turns on, off, and auto-off timer works.
+
+```bash
+curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' --data-binary @-
+<<'EOF'
+devices:
+  - id: buzzer1
+    type: buzzer
+    config: {gpio: 21, frequency: 2000, duty: 50}
+EOF
+
+# Immediate on/off
+curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":true}'
+curl -k https://$HOST/api/devices/buzzer1
+# Expect: {"on":true, "frequency":2000, "duty":50, "remaining_ms":0}
+
+curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":false}'
+curl -k https://$HOST/api/devices/buzzer1
+# Expect: {"on":false,...}
+
+# Auto-off after 200ms
+curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":true,"duration_ms":200}'
+# Wait 300ms
+curl -k https://$HOST/api/devices/buzzer1
+# Expect: {"on":false,...}
+```
+
+---
+
 ## P2 — network
 
 ### T2.1 Wi-Fi provisioning (BLE, default)

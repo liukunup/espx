@@ -57,6 +57,11 @@ The binding statement of intent lives in [AGENT.md](AGENT.md).
 | `relay` | read, write, notify | `gpio`, `active_level` |
 | `shiftreg_595` | read, write, notify | `data_gpio`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count` (1–8 cascaded) |
 | `ws2812` | read, write, notify | `data_gpio`, `count` (1–300), `brightness` |
+| `can` | read, write, notify | `tx_gpio`, `rx_gpio`, `bitrate` (125k/250k/500k/1M), `tx_queue_size`, `rx_queue_size` |
+| `mcp4725` | write, read | `sda_gpio`, `scl_gpio`, `i2c_addr`, `vref_mv`, `scl_freq` |
+| `ads1115` | read, periodic, notify | `sda_gpio`, `scl_gpio`, `i2c_addr`, `channel` (0–3), `gain`, `rate` (SPS), `interval_ms` |
+| `ina226` | read, periodic, notify | `sda_gpio`, `scl_gpio`, `i2c_addr`, `r_shunt` (mΩ), `max_current_ma`, `interval_ms` |
+| `buzzer` | write, read | `gpio`, `frequency` (Hz), `duty` (%), `auto_off_ms` |
 
 Adding hardware means writing one `device_type_t` driver and registering it —
 the core is untouched.
@@ -133,6 +138,26 @@ devices:
   - id: strip                   # WS2812 strip, 8 pixels
     type: ws2812
     config: {data_gpio: 48, count: 8, brightness: 128}
+
+  - id: can_bus                  # TJA1050 CAN bus
+    type: can
+    config: {tx_gpio: 6, rx_gpio: 7, bitrate: 500000}
+
+  - id: dac_out                  # MCP4725 DAC
+    type: mcp4725
+    config: {sda_gpio: 10, scl_gpio: 11, vref_mv: 3300}
+
+  - id: adc_ch0                   # ADS1115 ADC
+    type: ads1115
+    config: {sda_gpio: 10, scl_gpio: 11, channel: 0, gain: 1, rate: 4, interval_ms: 1000}
+
+  - id: power_meter               # INA226 power monitor
+    type: ina226
+    config: {sda_gpio: 10, scl_gpio: 11, r_shunt: 10, max_current_ma: 1000, interval_ms: 1000}
+
+  - id: buzzer1                  # Passive buzzer
+    type: buzzer
+    config: {gpio: 21, frequency: 2000, duty: 50}
 
 remove_devices: [old_sensor]
 replace_devices: false          # true also removes devices not listed above

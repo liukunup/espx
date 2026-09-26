@@ -41,7 +41,8 @@ over HTTPS and MQTT.
                  ├──────────────────────────────────────────────┤
                  │  peripherals (device_type drivers)           │
                  │  dht11 · button · relay · shiftreg_595       │
-                 │  · ws2812                                    │
+                 │  ws2812 · tja1050 (CAN) · mcp4725 (DAC)     │
+                 │  ads1115 (ADC) · ina226 (power) · buzzer   │
                  └──────────────────────────────────────────────┘
 ```
 
