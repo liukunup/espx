@@ -36,6 +36,56 @@ static bool g_started = false;
 static bool g_connected = false;
 static char g_topic_prefix[128] = {0};
 static char g_device_id[64] = {0};
+static char g_broker[256] = {0};
+static char g_username[64] = {0};
+static char g_password[64] = {0};
+
+/**
+ * @brief Load network configuration from node_config
+ *
+ * Reads the "network" object (set via Web UI or factory data),
+ * falling back to built-in defaults.
+ */
+static void load_network_config(void)
+{
+    snprintf(g_broker, sizeof(g_broker), "mqtt://test.mosquitto.org:1883");
+    g_username[0] = '\0';
+    g_password[0] = '\0';
+    snprintf(g_topic_prefix, sizeof(g_topic_prefix), "espx/%s", g_device_id);
+
+    cJSON *cfg = node_config_get();
+    if (cfg == NULL) return;
+
+    cJSON *net = cJSON_GetObjectItem(cfg, "network");
+    if (cJSON_IsObject(net)) {
+        cJSON *v;
+
+        v = cJSON_GetObjectItem(net, "mqtt_broker");
+        if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
+            strncpy(g_broker, v->valuestring, sizeof(g_broker) - 1);
+        }
+
+        v = cJSON_GetObjectItem(net, "mqtt_username");
+        if (cJSON_IsString(v)) {
+            strncpy(g_username, v->valuestring, sizeof(g_username) - 1);
+        }
+
+        v = cJSON_GetObjectItem(net, "mqtt_password");
+        if (cJSON_IsString(v)) {
+            strncpy(g_password, v->valuestring, sizeof(g_password) - 1);
+        }
+
+        v = cJSON_GetObjectItem(net, "mqtt_topic_prefix");
+        if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
+            strncpy(g_topic_prefix, v->valuestring, sizeof(g_topic_prefix) - 1);
+        }
+    }
+
+    cJSON_Delete(cfg);
+
+    ESP_LOGI(TAG, "Network: broker=%s prefix=%s user=%s",
+             g_broker, g_topic_prefix, g_username[0] ? g_username : "-");
+}
 
 static void build_topic(char *dest, size_t dest_size, const char *subtopic)
 {
@@ -112,6 +162,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 esp_err_t mqtt_client_init(void)
 {
     strncpy(g_device_id, node_config_get_device_id(), sizeof(g_device_id) - 1);
+    load_network_config();
     ESP_LOGI(TAG, "MQTT client initialized, device_id: %s", g_device_id);
     return ESP_OK;
 }
@@ -122,18 +173,22 @@ esp_err_t mqtt_client_start(void)
         return ESP_OK;
     }
 
-    // Build topic prefix
-    snprintf(g_topic_prefix, sizeof(g_topic_prefix), "espx/%s", g_device_id);
-
-    // For now use default broker (will be configurable via config manager)
-    const char *broker = "mqtt://test.mosquitto.org:1883";
+    // (Re)load configuration
+    load_network_config();
 
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = broker,
+        .broker.address.uri = g_broker,
         .credentials.client_id = g_device_id,
         .session.keepalive = 60,
         .session.disable_clean_session = false,
     };
+
+    if (g_username[0] != '\0') {
+        mqtt_cfg.credentials.username = g_username;
+    }
+    if (g_password[0] != '\0') {
+        mqtt_cfg.credentials.authentication.password = g_password;
+    }
 
     g_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     if (g_mqtt_client == NULL) {

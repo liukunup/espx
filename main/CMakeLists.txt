@@ -31,6 +31,12 @@ set(espx_sources
 
     # Wi-Fi provisioning
     "wifi_prov/wifi_prov.c"
+
+    # Manufacturing test mode
+    "test_mode/test_mode.c"
+
+    # Manufacturing provisioning
+    "mfg_provision/mfg_provision.c"
 )
 
 set(espx_include_dirs
@@ -41,6 +47,8 @@ set(espx_include_dirs
     "cert_manager"
     "web_server"
     "wifi_prov"
+    "test_mode"
+    "mfg_provision"
 )
 
 idf_component_register(

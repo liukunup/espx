@@ -22,6 +22,8 @@
 #include "cert_manager/cert_manager.h"
 #include "web_server/web_server.h"
 #include "wifi_prov/wifi_prov.h"
+#include "test_mode/test_mode.h"
+#include "mfg_provision/mfg_provision.h"
 
 static const char *TAG = "app_main";
 
@@ -35,6 +37,13 @@ void app_main(void)
     printf("  Chip     : ESP32-S3\n");
     printf("  Build    : %s %s\n", __DATE__, __TIME__);
     printf("================================================\n\n");
+
+    // Manufacturing test mode: hold TEST_MODE_GPIO low at boot
+    if (test_mode_check_trigger() == ESP_OK) {
+        ESP_LOGI(TAG, "Test mode triggered, entering self-test console");
+        test_mode_enter();
+        // Never returns
+    }
 
     ESP_LOGI(TAG, "Initializing NVS...");
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -56,6 +65,15 @@ void app_main(void)
     ESP_ERROR_CHECK(peripherals_register_all());
     ESP_ERROR_CHECK(device_manager_init());
     ESP_ERROR_CHECK(device_manager_load());
+
+    // Apply factory-preset configuration (if any)
+    ESP_LOGI(TAG, "Checking for factory configuration...");
+    if (mfg_provision_has_data()) {
+        ESP_LOGI(TAG, "Factory configuration found, applying...");
+        if (mfg_provision_load() != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to apply factory configuration");
+        }
+    }
 
     // Initialize LED
     ESP_LOGI(TAG, "Initializing LED driver...");

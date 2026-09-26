@@ -187,10 +187,44 @@ static esp_err_t send_error(httpd_req_t *req, const char *msg, int status)
 }
 
 /**
- * @brief GET /api/node - node info
+ * @brief GET/PUT /api/node - node info / identity
  */
 static esp_err_t api_node_handler(httpd_req_t *req)
 {
+    if (req->method == HTTP_PUT) {
+        char buf[256];
+        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+        if (len <= 0) return send_error(req, "Empty body", 400);
+        buf[len] = '\0';
+
+        cJSON *incoming = cJSON_Parse(buf);
+        if (incoming == NULL) return send_error(req, "Invalid JSON", 400);
+
+        cJSON *cfg = node_config_get();
+        if (cfg == NULL) cfg = cJSON_CreateObject();
+
+        cJSON *node = cJSON_GetObjectItem(cfg, "node");
+        if (!cJSON_IsObject(node)) {
+            node = cJSON_AddObjectToObject(cfg, "node");
+        }
+
+        const char *keys[] = { "name", "device_id" };
+        for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+            cJSON *v = cJSON_GetObjectItem(incoming, keys[i]);
+            if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
+                cJSON_ReplaceItemInObject(node, keys[i], cJSON_CreateString(v->valuestring));
+            }
+        }
+
+        esp_err_t err = node_config_set(cfg);
+        cJSON_Delete(cfg);
+        cJSON_Delete(incoming);
+
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
+        return send_json(req, resp, err == ESP_OK ? 200 : 500);
+    }
+
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "device_id", node_config_get_device_id());
     cJSON_AddStringToObject(json, "name", node_config_get_name());
@@ -471,6 +505,56 @@ static esp_err_t api_device_types_handler(httpd_req_t *req)
 }
 
 /**
+ * @brief GET/PUT /api/network - network (MQTT) configuration
+ */
+static esp_err_t api_network_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        cJSON *cfg = node_config_get();
+        cJSON *net = cfg ? cJSON_GetObjectItem(cfg, "network") : NULL;
+        cJSON *out = net ? cJSON_Duplicate(net, true) : cJSON_CreateObject();
+        if (cfg) cJSON_Delete(cfg);
+        return send_json(req, out, 200);
+    }
+
+    if (req->method == HTTP_PUT) {
+        char buf[512];
+        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+        if (len <= 0) return send_error(req, "Empty body", 400);
+        buf[len] = '\0';
+
+        cJSON *incoming = cJSON_Parse(buf);
+        if (incoming == NULL) return send_error(req, "Invalid JSON", 400);
+
+        cJSON *cfg = node_config_get();
+        if (cfg == NULL) cfg = cJSON_CreateObject();
+
+        cJSON *net = cJSON_GetObjectItem(cfg, "network");
+        if (!cJSON_IsObject(net)) {
+            net = cJSON_AddObjectToObject(cfg, "network");
+        }
+
+        cJSON *item;
+        cJSON_ArrayForEach(item, incoming) {
+            if (cJSON_IsString(item) || cJSON_IsNumber(item) || cJSON_IsBool(item)) {
+                cJSON_ReplaceItemInObject(net, item->string,
+                                          cJSON_Duplicate(item, true));
+            }
+        }
+
+        esp_err_t err = node_config_set(cfg);
+        cJSON_Delete(cfg);
+        cJSON_Delete(incoming);
+
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
+        return send_json(req, resp, err == ESP_OK ? 200 : 500);
+    }
+
+    return send_error(req, "Method not allowed", 400);
+}
+
+/**
  * @brief POST /api/system/reboot
  */
 static esp_err_t api_system_reboot_handler(httpd_req_t *req)
@@ -517,6 +601,9 @@ esp_err_t web_server_start(void)
     const httpd_uri_t uris[] = {
         { .uri = "/",                   .method = HTTP_GET,    .handler = root_handler },
         { .uri = "/api/node",           .method = HTTP_GET,    .handler = api_node_handler },
+        { .uri = "/api/node",           .method = HTTP_PUT,    .handler = api_node_handler },
+        { .uri = "/api/network",        .method = HTTP_GET,    .handler = api_network_handler },
+        { .uri = "/api/network",        .method = HTTP_PUT,    .handler = api_network_handler },
         { .uri = "/api/devices",        .method = HTTP_GET,    .handler = api_devices_list_handler },
         { .uri = "/api/devices",        .method = HTTP_POST,   .handler = api_device_add_handler },
         { .uri = "/api/devices/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },

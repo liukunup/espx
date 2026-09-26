@@ -1,6 +1,9 @@
 /**
  * @file test_mode.h
- * @brief Manufacturing Test Mode for ESPX device
+ * @brief Manufacturing Test Mode (hardware self-test)
+ *
+ * Triggered at boot by pulling TEST_MODE_GPIO low. Provides an interactive
+ * UART console to configure devices and run hardware self-tests.
  */
 
 #ifndef TEST_MODE_H
@@ -13,64 +16,27 @@
 extern "C" {
 #endif
 
-/**
- * @brief Test item types
- */
-typedef enum {
-    TEST_ITEM_LED,
-    TEST_ITEM_BUTTON,
-    TEST_ITEM_WIFI,
-    TEST_ITEM_MQTT,
-    TEST_ITEM_UART,
-    TEST_ITEM_COUNT
-} test_item_t;
-
-/**
- * @brief Test result
- */
-typedef enum {
-    TEST_RESULT_NONE,
-    TEST_RESULT_PASS,
-    TEST_RESULT_FAIL,
-} test_result_t;
-
-/**
- * @brief Test mode GPIO pin
- */
+/** GPIO held low at boot to enter test mode */
+#ifndef TEST_MODE_GPIO
 #define TEST_MODE_GPIO CONFIG_MFG_TEST_GPIO
+#endif
 
 /**
- * @brief Check if test mode should be triggered
+ * @brief Check whether test mode should be entered
  *
- * Called during boot to check if test mode GPIO is pressed.
+ * Configures TEST_MODE_GPIO as input with pull-up and samples it.
  *
- * @return ESP_OK if test mode triggered, ESP_FAIL otherwise
+ * @return ESP_OK if triggered (pin low), ESP_FAIL otherwise
  */
 esp_err_t test_mode_check_trigger(void);
 
 /**
  * @brief Enter test mode
  *
- * Runs the interactive test menu via UART.
- * This function does not return - device reboots on exit.
+ * Initializes device registry + peripherals (without Wi-Fi/MQTT) and runs
+ * the interactive UART console. Does not return (reboots on exit).
  */
 void test_mode_enter(void);
-
-/**
- * @brief Get test result for a specific item
- *
- * @param item Test item
- * @return Test result
- */
-test_result_t test_mode_get_result(test_item_t item);
-
-/**
- * @brief Set test result for a specific item
- *
- * @param item Test item
- * @param result Test result
- */
-void test_mode_set_result(test_item_t item, test_result_t result);
 
 #ifdef __cplusplus
 }
