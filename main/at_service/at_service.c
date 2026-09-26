@@ -832,15 +832,20 @@ esp_err_t at_service_start(void)
         return err;
     }
 
-    /* Decide the pins.
+    /* Pin routing.
      *
-     * 1. If AT shares the console's UART, its pins are already correct and are
-     *    owned by the console: re-pinning would move the log output to the AT
-     *    pins and break the console.
-     * 2. Otherwise, by default leave the pins to the UART's IO_MUX, which is
-     *    what a board is wired for (UART1 -> TX=17, RX=18 on ESP32-S3).
-     * 3. Explicit pins route through the GPIO matrix, which is required for
-     *    UART2 (no IO_MUX) or when the default pins are taken.
+     * uart_set_pin() is what attaches the UART's internal signals to pads. It is
+     * NOT optional when using the "default" pins: out of reset GPIO17/18 are
+     * plain GPIO, not UART1, and skipping the call leaves UART1 driving nothing
+     * at all -- the port then looks dead (zero bytes on the wire) while the log
+     * cheerfully reports which pins it intended to use.
+     *
+     * Passing the UART's own IO_MUX pins selects the direct IO_MUX path; passing
+     * other pins routes through the GPIO matrix. Both go through this call.
+     *
+     * The one case that must not call it is when AT shares the console's UART:
+     * the console already configured those pads, and re-pinning would move the
+     * log output onto the AT pins.
      */
 #if (CONFIG_ESPX_AT_UART_NUM == CONFIG_ESP_CONSOLE_UART_NUM) && \
     defined(CONFIG_ESP_CONSOLE_UART_DEFAULT)
@@ -848,19 +853,29 @@ esp_err_t at_service_start(void)
                   "output will interleave with AT replies -- manual debugging only.",
              CONFIG_ESPX_AT_UART_NUM,
              CONFIG_ESP_CONSOLE_UART_TX_GPIO, CONFIG_ESP_CONSOLE_UART_RX_GPIO);
-#elif defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS)
-    ESP_LOGI(TAG, "AT pins: UART%d IO_MUX default", CONFIG_ESPX_AT_UART_NUM);
+#else
+    {
+#if defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS)
+    #if (CONFIG_ESPX_AT_UART_NUM == 2)
+        #error "UART2 has no IO_MUX pins: disable ESPX_AT_USE_DEFAULT_PINS and set explicit TX/RX GPIOs."
+    #endif
+        const int tx_pin = AT_DEFAULT_TX_PIN;
+        const int rx_pin = AT_DEFAULT_RX_PIN;
+#else
+        const int tx_pin = CONFIG_ESPX_AT_UART_TX_GPIO;
+        const int rx_pin = CONFIG_ESPX_AT_UART_RX_GPIO;
 #endif
-
-#if !defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS) && \
-    !((CONFIG_ESPX_AT_UART_NUM == CONFIG_ESP_CONSOLE_UART_NUM) && \
-      defined(CONFIG_ESP_CONSOLE_UART_DEFAULT))
-    err = uart_set_pin(AT_UART, CONFIG_ESPX_AT_UART_TX_GPIO,
-                       CONFIG_ESPX_AT_UART_RX_GPIO,
-                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "uart_set_pin failed: %s", esp_err_to_name(err));
-        return err;
+        err = uart_set_pin(AT_UART, tx_pin, rx_pin,
+                           UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "uart_set_pin(%d, %d) failed: %s",
+                     tx_pin, rx_pin, esp_err_to_name(err));
+            return err;
+        }
+        ESP_LOGI(TAG, "AT pins routed: UART%d TX=%d RX=%d%s",
+                 CONFIG_ESPX_AT_UART_NUM, tx_pin, rx_pin,
+                 (tx_pin == AT_DEFAULT_TX_PIN && rx_pin == AT_DEFAULT_RX_PIN)
+                     ? " (IO_MUX defaults)" : "");
     }
 #endif
 
@@ -872,15 +887,8 @@ esp_err_t at_service_start(void)
         return ESP_FAIL;
     }
 
-#if defined(CONFIG_ESPX_AT_USE_DEFAULT_PINS)
-    ESP_LOGI(TAG, "AT service ready on UART%d (default pins: TX=%d RX=%d, %d baud)",
-             CONFIG_ESPX_AT_UART_NUM, AT_DEFAULT_TX_PIN, AT_DEFAULT_RX_PIN,
-             CONFIG_ESPX_AT_UART_BAUD);
-#else
-    ESP_LOGI(TAG, "AT service ready on UART%d (TX=%d RX=%d, %d baud)",
-             CONFIG_ESPX_AT_UART_NUM, CONFIG_ESPX_AT_UART_TX_GPIO,
-             CONFIG_ESPX_AT_UART_RX_GPIO, CONFIG_ESPX_AT_UART_BAUD);
-#endif
+    ESP_LOGI(TAG, "AT service ready on UART%d, %d baud",
+             CONFIG_ESPX_AT_UART_NUM, CONFIG_ESPX_AT_UART_BAUD);
     return ESP_OK;
 }
 
