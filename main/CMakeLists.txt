@@ -3,6 +3,7 @@ set(src_dirs
     app
     wifi_prov
     param_store
+    cert_manager
 )
 
 set(include_dirs
@@ -10,6 +11,7 @@ set(include_dirs
     app
     wifi_prov
     param_store
+    cert_manager
 )
 
 set(requires
@@ -17,6 +19,7 @@ set(requires
     nvs_flash
     esp_mac
     cjson
+    mbedtls
 )
 
 idf_component_register(
