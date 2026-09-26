@@ -26,6 +26,7 @@ set(espx_sources
 
     # Peripheral drivers
     "peripherals/peripherals.c"
+    "peripherals/esp_idf_i2c.c"
     "peripherals/dht11.c"
     "peripherals/button.c"
     "peripherals/relay.c"
