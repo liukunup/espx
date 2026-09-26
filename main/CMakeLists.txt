@@ -13,6 +13,15 @@ set(espx_sources
     "core/device_manager.c"
     "core/yaml.c"
     "core/config_apply.c"
+    "core/sys_stats.c"
+
+    # Serial AT interface
+    "at_service/at_service.c"
+
+    # IP-dependent services
+    "net_services/net_services.c"
+    "net_services/time_sync.c"
+    "net_services/mdns_service.c"
 
     # Peripheral drivers
     "peripherals/peripherals.c"
@@ -30,6 +39,7 @@ set(espx_sources
     # Web / certificates
     "cert_manager/cert_manager.c"
     "web_server/web_server.c"
+    "web_server/ws_server.c"
 
     # Wi-Fi provisioning
     "wifi_prov/wifi_prov.c"
@@ -55,6 +65,8 @@ set(espx_include_dirs
     "test_mode"
     "mfg_provision"
     "ota_service"
+    "net_services"
+    "at_service"
 )
 
 idf_component_register(
@@ -64,7 +76,7 @@ idf_component_register(
         "web_server/web_files/index.html"
         "cert_manager/certs/server.crt"
         "cert_manager/certs/server.key"
-    REQUIRES mqtt network_provisioning esp_delta_ota
+    REQUIRES mqtt network_provisioning esp_delta_ota mdns
     PRIV_REQUIRES
         nvs_flash
         esp_netif

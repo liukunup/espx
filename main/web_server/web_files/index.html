@@ -58,6 +58,9 @@ input:focus,select:focus{outline:2px solid #bfdbfe;border-color:var(--p)}
 .fg .hint{font-size:.72rem;color:var(--muted);margin-top:.2rem}
 .bar{height:7px;background:var(--bg);border-radius:4px;overflow:hidden;margin-top:.5rem}
 .bar>div{height:100%;background:var(--p);width:0;transition:width .3s}
+.bar>div.warn{background:var(--warn)}
+.bar>div.crit{background:var(--err)}
+.meta{font-size:.72rem;color:var(--muted);font-weight:400}
 .toast{position:fixed;bottom:1rem;right:1rem;padding:.75rem 1.1rem;border-radius:.5rem;
   color:#fff;font-weight:500;font-size:.85rem;transform:translateY(120px);opacity:0;
   transition:all .25s;z-index:1000;max-width:80vw}
@@ -70,6 +73,7 @@ input:focus,select:focus{outline:2px solid #bfdbfe;border-color:var(--p)}
   max-height:85vh;overflow-y:auto}
 .modal-box h3{margin-bottom:1rem;font-size:1rem}
 .hide{display:none!important}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem}
 pre{background:#0f172a;color:#e2e8f0;padding:.75rem;border-radius:.5rem;
   font-size:.75rem;overflow-x:auto}
 </style>
@@ -77,7 +81,12 @@ pre{background:#0f172a;color:#e2e8f0;padding:.75rem;border-radius:.5rem;
 <body>
 <header>
   <h1>ESPX Node <small id="hdr-id"></small></h1>
-  <div class="status"><span id="hdr-status">connecting…</span><div id="hdr-dot" class="dot"></div></div>
+  <div class="status">
+    <span id="hdr-mdns" class="mono" title="mDNS name"></span>
+    <span id="hdr-time" class="mono" title="NTP time"></span>
+    <span id="hdr-live" class="badge" title="WebSocket live updates">ws</span>
+    <span id="hdr-status">connecting…</span><div id="hdr-dot" class="dot"></div>
+  </div>
 </header>
 
 <main>
@@ -100,6 +109,32 @@ pre{background:#0f172a;color:#e2e8f0;padding:.75rem;border-radius:.5rem;
       <div class="item"><div class="lbl">Devices</div><div class="val" id="n-count">-</div></div>
       <div class="item"><div class="lbl">Uptime</div><div class="val" id="n-up">-</div></div>
       <div class="item"><div class="lbl">Free heap</div><div class="val" id="n-heap">-</div></div>
+      <div class="item"><div class="lbl">NTP time</div><div class="val" id="n-time">not synced</div></div>
+      <div class="item"><div class="lbl">mDNS</div><div class="val" id="n-mdns">-</div></div>
+      <div class="item"><div class="lbl">WS clients</div><div class="val" id="n-ws">0</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>System</h2>
+    <div class="grid">
+      <div class="item">
+        <div class="lbl">CPU load <span id="cpu-sub" class="meta"></span></div>
+        <div class="val" id="cpu-usage">-</div>
+        <div class="bar"><div id="cpu-bar"></div></div>
+      </div>
+      <div class="item">
+        <div class="lbl">Internal RAM <span id="iram-sub" class="meta"></span></div>
+        <div class="val" id="iram-used">-</div>
+        <div class="bar"><div id="iram-bar"></div></div>
+      </div>
+      <div class="item">
+        <div class="lbl">PSRAM <span id="psram-sub" class="meta"></span></div>
+        <div class="val" id="psram-used">-</div>
+        <div class="bar"><div id="psram-bar"></div></div>
+      </div>
+      <div class="item"><div class="lbl">Tasks</div><div class="val" id="n-tasks">-</div></div>
+      <div class="item"><div class="lbl">Internal low-water</div><div class="val" id="iram-min">-</div></div>
+      <div class="item"><div class="lbl">Largest free block (int)</div><div class="val" id="iram-largest">-</div></div>
     </div>
   </div>
   <div class="card">
@@ -286,11 +321,79 @@ async function loadNode() {
   document.getElementById('hdr-dot').classList.add('ok');
 }
 
+// Render a percentage bar. Colour encodes pressure rather than just filling
+// the width: internal RAM above 85% is the condition that makes TLS handshakes
+// fail, so it should not look the same as 30%.
+function renderBar(barId, valueId, pct, text) {
+  const bar = document.getElementById(barId);
+  const val = document.getElementById(valueId);
+  const p = Math.max(0, Math.min(100, pct || 0));
+  if (val) val.textContent = text != null ? text : (p.toFixed(0) + '%');
+  if (bar) {
+    bar.style.width = p + '%';
+    bar.className = p >= 85 ? 'crit' : (p >= 65 ? 'warn' : '');
+  }
+}
+
+function renderSystem(s) {
+  const cpu = s.cpu || {};
+  const ram = s.ram || {};
+
+  renderBar('cpu-bar', 'cpu-usage',
+            cpu.usage,
+            cpu.usage == null ? 'n/a' : cpu.usage.toFixed(0) + '%');
+  document.getElementById('cpu-sub').textContent =
+    (cpu.freq_mhz ? cpu.freq_mhz + ' MHz x' + (cpu.cores || 2) : '');
+
+  if (ram.internal_total != null) {
+    renderBar('iram-bar', 'iram-used', ram.internal_used_pct,
+              fmtBytes(ram.internal_free) + ' free');
+    document.getElementById('iram-sub').textContent =
+      'of ' + fmtBytes(ram.internal_total);
+    document.getElementById('iram-min').textContent = fmtBytes(ram.internal_min_free);
+    document.getElementById('iram-largest').textContent = fmtBytes(ram.internal_largest);
+  }
+
+  if (ram.psram_total != null) {
+    renderBar('psram-bar', 'psram-used', ram.psram_used_pct,
+              fmtBytes(ram.psram_free) + ' free');
+    document.getElementById('psram-sub').textContent =
+      'of ' + fmtBytes(ram.psram_total);
+  } else {
+    document.getElementById('psram-used').textContent = 'not present';
+  }
+
+  document.getElementById('n-tasks').textContent = cpu.tasks != null ? cpu.tasks : '-';
+}
+
+// Populate every field the REST API can supply. The WebSocket is an
+// optimisation, not a requirement: if it never connects the page must still
+// show time, mDNS name and heap rather than leaving those fields blank.
 async function loadSys() {
   try {
     const s = await api('/api/system/info');
+
     document.getElementById('n-up').textContent = fmtUptime(s.uptime || 0);
-    document.getElementById('n-heap').textContent = fmtBytes(s.free_heap || 0);
+
+    // Internal RAM is the pool that actually runs out (TLS sessions, Wi-Fi);
+    // the headline figure includes PSRAM and hides it.
+    document.getElementById('n-heap').textContent =
+      fmtBytes(s.free_heap || 0) +
+      (s.free_heap_internal != null ? ' (int ' + fmtBytes(s.free_heap_internal) + ')' : '');
+
+    document.getElementById('n-time').textContent = s.time || 'not synced yet';
+    document.getElementById('n-mdns').textContent = s.mdns || '-';
+    document.getElementById('n-ws').textContent = (s.ws_clients != null ? s.ws_clients : 0);
+
+    if (s.cpu || s.ram) renderSystem(s);
+
+    if (s.mdns) {
+      const h = document.getElementById('hdr-mdns');
+      h.textContent = s.mdns;
+      h.title = 'reachable at https://' + s.mdns + '/';
+    }
+    if (s.time) document.getElementById('hdr-time').textContent = s.time.split('T')[1] || s.time;
+
     if (s.wifi_ssid) {
       document.getElementById('w-status').textContent = 'connected';
       document.getElementById('w-ssid').textContent = s.wifi_ssid;
@@ -339,6 +442,7 @@ async function loadDevices() {
 }
 
 async function devRead(id) {
+  if (wsSend({ type: 'read', id })) return;       // reply arrives over the socket
   try { toast(id + ': ' + JSON.stringify(await api('/api/devices/' + id + '/read', { method: 'POST' })), 'ok'); }
   catch (e) { toast('Read failed: ' + e.message, 'err'); }
 }
@@ -495,6 +599,94 @@ document.getElementById('btn-testmode').addEventListener('click', async () => {
   catch (e) { /* connection drops expected */ }
 });
 
+/* ---------- WebSocket live updates ---------- */
+let ws = null, wsRetry = 0, wsAlive = false;
+
+function wsSetState(ok) {
+  wsAlive = ok;
+  const el = document.getElementById('hdr-live');
+  el.className = 'badge ' + (ok ? 'ok' : 'err');
+  el.textContent = ok ? 'live' : 'poll';
+}
+
+function renderState(msg) {
+  const box = document.getElementById('live');
+  const devs = msg.devices || [];
+  if (!devs.length) { box.innerHTML = '<div class="meta">No devices bound.</div>'; return; }
+  box.innerHTML = devs.map(d => `
+    <div class="row">
+      <div>
+        <strong>${esc(d.id)}</strong>
+        <span class="badge">${esc(d.type)}</span>
+        <div class="meta">${esc(d.description || '')}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="val" style="font-size:.9rem">${json(d.value)}</div>
+        <span class="badge ${d.initialized ? 'ok' : 'err'}">${d.initialized ? 'ok' : 'off'}</span>
+      </div>
+    </div>`).join('');
+
+  if (msg.time) {
+    document.getElementById('n-time').textContent = msg.time;
+    document.getElementById('hdr-time').textContent = msg.time.split('T')[1] || msg.time;
+  }
+  if (typeof msg.uptime === 'number') document.getElementById('n-up').textContent = fmtUptime(msg.uptime);
+  if (typeof msg.ws_clients === 'number') document.getElementById('n-ws').textContent = msg.ws_clients;
+  if (msg.cpu || msg.ram) renderSystem(msg);
+}
+
+function wsConnect() {
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  try { ws = new WebSocket(proto + location.host + '/ws'); }
+  catch (e) { wsSetState(false); return; }
+
+  ws.onopen = () => { wsRetry = 0; wsSetState(true); };
+  ws.onclose = () => {
+    wsSetState(false);
+    // back off, but keep trying: a reboot or a dropped AP must recover
+    wsRetry = Math.min(wsRetry + 1, 6);
+    setTimeout(wsConnect, 1000 * wsRetry);
+  };
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+
+  ws.onmessage = ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    switch (msg.type) {
+      case 'hello':
+        if (msg.mdns) {
+          document.getElementById('n-mdns').textContent = msg.mdns;
+          const a = document.getElementById('hdr-mdns');
+          a.textContent = msg.mdns;
+          a.title = 'reachable at https://' + msg.mdns + '/';
+        }
+        if (msg.time) document.getElementById('n-time').textContent = msg.time;
+        break;
+      case 'state':
+        renderState(msg);
+        break;
+      case 'config_result':
+        toast(msg.ok ? 'Configuration applied' : ('Config failed: ' + (msg.error || '')), msg.ok ? 'ok' : 'err');
+        refresh();
+        break;
+      case 'result':
+        toast(msg.id + ': ' + JSON.stringify(msg.value));
+        break;
+      case 'error':
+        toast(msg.error || 'error', 'err');
+        break;
+      default: break;
+    }
+  };
+}
+
+function wsSend(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+    return true;
+  }
+  return false;
+}
+
 /* ---------- init ---------- */
 async function refresh() {
   try { await loadNode(); } catch (e) { /* ignore */ }
@@ -506,7 +698,10 @@ async function init() {
   try { TYPES = await api('/api/device-types'); } catch (e) { TYPES = []; }
   await refresh();
   loadSys(); loadNet(); loadOta(); loadCert();
-  setInterval(loadLive, 5000);
+  wsConnect();
+  // Poll only while the socket is down, so a healthy link does not generate
+  // needless request traffic.
+  setInterval(() => { if (!wsAlive) loadLive(); }, 5000);
   setInterval(loadSys, 10000);
   setInterval(loadOta, 1500);
 }

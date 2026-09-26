@@ -641,6 +641,38 @@ cJSON *yaml_parse_ex(const char *text, int *err_line, const char **err_msg)
         return cJSON_CreateNull();          /* empty document */
     }
 
+    /* A document that is a single flow collection: "{a: 1}" or "[1, 2]".
+     * This is the natural one-liner form (a console command, a small MQTT
+     * payload) and must work at the root, not only in value position. */
+    if (c.count == 1 && (c.lines[0].text[0] == '{' || c.lines[0].text[0] == '[')) {
+        const char *p = c.lines[0].text;
+        const char *end = c.lines[0].text + c.lines[0].len;
+        int err = 0;
+        cJSON *root = flow_parse(&p, end, &err);
+        if (err || root == NULL) {
+            cJSON_Delete(root);
+            set_err(&c, c.lines[0].line_no,
+                    "malformed flow collection at the document root");
+            free(c.lines);
+            if (err_line) *err_line = c.err_line;
+            if (err_msg) *err_msg = c.err_msg;
+            return NULL;
+        }
+        while (p < end && (*p == ' ' || *p == '\t')) p++;
+        if (p != end) {
+            cJSON_Delete(root);
+            set_err(&c, c.lines[0].line_no, "trailing characters after flow collection");
+            free(c.lines);
+            if (err_line) *err_line = c.err_line;
+            if (err_msg) *err_msg = c.err_msg;
+            return NULL;
+        }
+        free(c.lines);
+        if (err_line) *err_line = 0;
+        if (err_msg) *err_msg = NULL;
+        return root;
+    }
+
     size_t i = 0;
     cJSON *root = parse_block(&c, &i, c.lines[0].indent);
 

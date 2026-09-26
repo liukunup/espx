@@ -14,6 +14,7 @@
 #include <esp_system.h>
 #include <cJSON.h>
 
+#include "app_info.h"
 #include "node_config.h"
 
 static const char *TAG = "node_config";
@@ -104,7 +105,7 @@ esp_err_t node_config_save(void)
 
     cJSON_ReplaceItemInObject(node, "device_id", cJSON_CreateString(g_device_id));
     cJSON_ReplaceItemInObject(node, "name", cJSON_CreateString(g_name));
-    cJSON_ReplaceItemInObject(node, "fw_version", cJSON_CreateString(CONFIG_FIRMWARE_VERSION));
+    cJSON_ReplaceItemInObject(node, "fw_version", cJSON_CreateString(app_version()));
 
     char *json_str = cJSON_PrintUnformatted(g_config);
     if (json_str == NULL) {
@@ -135,7 +136,7 @@ cJSON* node_config_get(void)
         cJSON *node = cJSON_AddObjectToObject(g_config, "node");
         cJSON_AddStringToObject(node, "device_id", g_device_id);
         cJSON_AddStringToObject(node, "name", g_name);
-        cJSON_AddStringToObject(node, "fw_version", CONFIG_FIRMWARE_VERSION);
+        cJSON_AddStringToObject(node, "fw_version", app_version());
     }
     return cJSON_Duplicate(g_config, true);
 }

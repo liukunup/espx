@@ -404,6 +404,15 @@ esp_err_t ota_service_init(void)
     s_running = false;
     s_cancel = false;
 
+    /* Populate the running version up front. The OTA task also sets it, but a
+     * client polling /api/ota/status before any update would otherwise see an
+     * empty string instead of the firmware it is talking to. */
+    const esp_app_desc_t *app = esp_app_get_description();
+    if (app) {
+        strncpy(s_status.running_version, app->version,
+                sizeof(s_status.running_version) - 1);
+    }
+
     ESP_LOGI(TAG, "OTA service initialized (delta OTA)");
     return ESP_OK;
 }

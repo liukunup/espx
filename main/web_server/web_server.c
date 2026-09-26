@@ -12,6 +12,7 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
@@ -19,6 +20,7 @@
 #include <esp_http_server.h>
 #include <cJSON.h>
 
+#include "app_info.h"
 #include "web_server.h"
 #include "node_config.h"
 #include "device_manager.h"
@@ -27,6 +29,10 @@
 #include "ota_service/ota_service.h"
 #include "cert_manager/cert_manager.h"
 #include "test_mode/test_mode.h"
+#include "ws_server.h"
+#include "net_services/time_sync.h"
+#include "net_services/mdns_service.h"
+#include "sys_stats.h"
 
 static const char *TAG = "web_server";
 
@@ -119,7 +125,7 @@ static esp_err_t api_node_handler(httpd_req_t *req)
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "device_id", node_config_get_device_id());
     cJSON_AddStringToObject(json, "name", node_config_get_name());
-    cJSON_AddStringToObject(json, "version", CONFIG_FIRMWARE_VERSION);
+    cJSON_AddStringToObject(json, "version", app_version());
     cJSON_AddNumberToObject(json, "device_count", device_get_count());
 
     return send_json(req, json, 200);
@@ -470,6 +476,66 @@ static esp_err_t api_system_info_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(json, "free_heap", (double)esp_get_free_heap_size());
     cJSON_AddNumberToObject(json, "min_free_heap", (double)esp_get_minimum_free_heap_size());
 
+    /* esp_get_free_heap_size() includes PSRAM, which hides the pool that
+     * actually runs out: mbedTLS handshake buffers and Wi-Fi come from internal
+     * RAM. A TLS session that fails to be created is almost always this figure,
+     * not the headline one. */
+    cJSON_AddNumberToObject(json, "free_heap_internal",
+        (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(json, "min_free_heap_internal",
+        (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+
+    /* Clock: null until NTP has set it, so a client can tell the difference
+     * between "midnight 1970" and "not synced yet". */
+    cJSON *epoch = cJSON_AddNumberToObject(json, "epoch", (double)time_sync_epoch());
+    if (epoch && time_sync_epoch() == 0) {
+        cJSON_DeleteItemFromObject(json, "epoch");
+        cJSON_AddNullToObject(json, "epoch");
+    }
+    char iso[32];
+    if (time_sync_iso8601(iso, sizeof(iso)) == ESP_OK) {
+        cJSON_AddStringToObject(json, "time", iso);
+    } else {
+        cJSON_AddNullToObject(json, "time");
+    }
+    cJSON_AddBoolToObject(json, "time_synced", time_sync_is_synced());
+    cJSON_AddStringToObject(json, "ntp_server", time_sync_server());
+    cJSON_AddStringToObject(json, "timezone", time_sync_timezone());
+
+    if (mdns_service_is_running()) {
+        cJSON_AddStringToObject(json, "mdns", mdns_service_fqdn());
+    }
+    cJSON_AddNumberToObject(json, "ws_clients", ws_server_client_count());
+
+    /* CPU load and RAM. Internal RAM is reported separately from the total
+     * because it is the pool that actually runs out. */
+    sys_stats_t st;
+    sys_stats_get(&st);
+
+    cJSON *cpu = cJSON_AddObjectToObject(json, "cpu");
+    cJSON_AddNumberToObject(cpu, "freq_mhz", st.cpu_freq_mhz);
+    cJSON_AddNumberToObject(cpu, "cores", 2);
+    if (st.cpu_valid) {
+        cJSON_AddNumberToObject(cpu, "usage", (double)st.cpu_usage);
+    } else {
+        cJSON_AddNullToObject(cpu, "usage");
+    }
+    cJSON_AddNumberToObject(cpu, "tasks", st.task_count);
+
+    cJSON *ram = cJSON_AddObjectToObject(json, "ram");
+    cJSON_AddNumberToObject(ram, "internal_total", (double)st.int_total);
+    cJSON_AddNumberToObject(ram, "internal_free", (double)st.int_free);
+    cJSON_AddNumberToObject(ram, "internal_min_free", (double)st.int_min_free);
+    cJSON_AddNumberToObject(ram, "internal_largest", (double)st.int_largest);
+    cJSON_AddNumberToObject(ram, "internal_used_pct",
+                            (double)sys_stats_internal_used_pct(&st));
+    if (st.psram_present) {
+        cJSON_AddNumberToObject(ram, "psram_total", (double)st.psram_total);
+        cJSON_AddNumberToObject(ram, "psram_free", (double)st.psram_free);
+        cJSON_AddNumberToObject(ram, "psram_used_pct",
+                                (double)sys_stats_psram_used_pct(&st));
+    }
+
     /* Wi-Fi state + IP */
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
@@ -673,7 +739,22 @@ esp_err_t web_server_start(void)
     config.servercert_len = server_cert.cert_len;
     config.prvtkey_pem = (uint8_t *)server_cert.key_pem;
     config.prvtkey_len = server_cert.key_len;
-    config.httpd.max_uri_handlers = 24;
+    config.httpd.max_uri_handlers = 28;
+
+    /* Wildcards are NOT matched by default: with uri_match_fn == NULL the
+     * server does a plain string compare, so a pattern ending in a star never
+     * matches a real path such as "/api/devices/relay_a/read". Every such
+     * request would 404 with the server's own "Nothing matches the given URI".
+     * Selecting the wildcard matcher is what makes the dispatcher reachable. */
+    config.httpd.uri_match_fn = httpd_uri_match_wildcard;
+    /* HTTP requests and WebSocket clients share this pool. Each open socket
+     * holds a full TLS session, and mbedTLS handshake state must live in
+     * INTERNAL RAM (not PSRAM). At 7 the internal pool is exhausted under a
+     * browser's parallel requests: mbedtls_ssl_setup then fails with
+     * PSA_ERROR_INSUFFICIENT_MEMORY and the server refuses every further
+     * connection until reboot. 4 comfortably covers one browser (1 WebSocket +
+     * a couple of in-flight requests). */
+    config.httpd.max_open_sockets = 4;
 
     ESP_LOGI(TAG, "Starting HTTPS server...");
         err = httpd_ssl_start(&g_server, &config);
@@ -714,6 +795,12 @@ esp_err_t web_server_start(void)
             ESP_LOGE(TAG, "Failed to register %s", uris[i].uri);
         }
     }
+
+#if CONFIG_ESPX_WS_ENABLE
+    if (ws_server_start(g_server) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start the WebSocket endpoint");
+    }
+#endif
 
     free(server_cert.cert_pem);
     free(server_cert.key_pem);

@@ -46,15 +46,10 @@ cJSON *yaml_parse(const char *text);
  */
 cJSON *yaml_parse_ex(const char *text, int *err_line, const char **err_msg);
 
-/**
- * @brief Whether a payload looks like YAML rather than JSON
- *
- * JSON objects/arrays start with '{' or '['; everything else is treated as YAML.
- */
-static inline bool yaml_looks_like_yaml(const char *text)
-{
-    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') text++;
-    return !(*text == '{' || *text == '[');
-}
+
+/* Note: there is deliberately no "does this look like YAML?" helper.
+ * A flow-style YAML document starts with '{' or '[' just like JSON, so any
+ * prefix-based heuristic misclassifies one of them. Callers must attempt JSON
+ * first and fall back to YAML (see config_parse_document). */
 
 #endif /* ESPX_YAML_H */

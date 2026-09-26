@@ -20,6 +20,13 @@ over HTTPS and MQTT.
                  │    state / sensors / attrs  →  publish       │
                  │    cmd/…                    ←  subscribe     │
                  ├──────────────────────────────────────────────┤
+   Web browser ──┤  WebSocket  /ws  (live state, no polling)    │
+                 ├──────────────────────────────────────────────┤
+   host MCU ─────┤  Serial AT commands (UART1, ESP-AT style)    │
+                 ├──────────────────────────────────────────────┤
+   LAN ──────────┤  mDNS  <prefix><mac>.local                   │
+                 │  NTP   clock sync                            │
+                 ├──────────────────────────────────────────────┤
    UART console ─┤  Manufacturing test mode (self-test CLI)     │
                  ├──────────────────────────────────────────────┤
    BOOT button ──┤  long-press 3 s → reboot into test mode      │
@@ -196,7 +203,36 @@ paths win over the wildcard dispatcher.
 `/api/devices/*` is a single dispatcher because the ESP-IDF HTTP server only
 supports a trailing `*` wildcard — `/api/devices/*/read` would never match.
 
-### 4.3 Serial test console
+### 4.3 WebSocket
+
+`/ws` (under the same HTTPS server) pushes state so a UI does not poll.
+
+Server → client: `hello` (identity, time, mDNS name), `state` (all devices with
+values), `result`, `config_result`, `error`, `pong`.
+
+Client → server: `ping`, `refresh`, `read`, `write`, `config` (YAML document).
+
+A push is triggered immediately by `EVENT_DEVICE_VALUE_CHANGED` and the other
+device events; otherwise a 1 s tick re-evaluates. An identical payload is
+skipped, so an idle node produces no traffic.
+
+Requires `CONFIG_HTTPD_WS_SUPPORT`. HTTP requests and WebSocket clients share
+the server's socket pool (`max_open_sockets`, default 7).
+
+### 4.4 Serial AT commands
+
+UART1 by default (TX=GPIO4, RX=GPIO5, 115200) so the AT port and the
+log/manufacturing console (UART0) stay independent. Wire format and command set
+follow ESP-AT: CR+LF terminated, `\r\nOK\r\n` / `\r\nERROR\r\n`, queries as
+`\r\n+CMD:<value>\r\n`.
+
+It is a documented **subset** of ESP-AT. ESP-AT is a complete application that
+takes over the device; here AT is one more channel onto the same configuration
+model, so every mutating command delegates to
+`config_apply()` / `device_write()` / the MQTT client. Run `AT+HELP?` for the
+supported list.
+
+### 4.5 Serial test console
 
 Reached by holding BOOT for 3 s, via `POST /api/system/testmode`, or MQTT
 `cmd/config {"action":"testmode"}`.
@@ -323,10 +359,15 @@ Default transport is **BLE** (`CONFIG_ESPX_PROV_TRANSPORT_BLE`):
 SoftAP transport remains selectable (`CONFIG_ESPX_PROV_TRANSPORT_SOFTAP`) for
 situations with no BLE-capable client.
 
+Once it has an address, the node is reachable over mDNS under its device id
+(lower-cased, `[a-z0-9-]` only — e.g. `espx-84c7bb772e74.local`), which is the
+same string as the MQTT topic prefix and `AT+ID`, advertising `_https._tcp` with TXT records
+`id`/`model`/`version`, so a client learns the identity before the first request.
+
 **Consequence for bring-up:** an unprovisioned BLE-only device is unreachable
-over the network — neither the HTTPS API nor MQTT is available until it joins
-Wi-Fi. For bench testing without a phone app, either provision over BLE or use
-the pre-provisioned path in §7.1.
+over the network — neither the HTTPS API, MQTT, mDNS nor NTP is available until
+it joins Wi-Fi. For bench testing without a phone app, either provision over BLE
+or use the pre-provisioned path in §7.1.
 
 ## 7. Factory provisioning
 
@@ -405,6 +446,7 @@ app_main()
  ├─ test_mode_check_trigger()             // NVS request flag, or TEST_MODE_GPIO
  │     └─ test_mode_enter()  → never returns
  ├─ test_mode_start_longpress_watchdog()  // BOOT 3 s → set flag → reboot
+ ├─ at_service_start()                    // UART1, network independent
  ├─ node_config_init() / node_config_load()
  ├─ event_bus_init()
  ├─ device_type_registry_init() + peripherals_register_all()
@@ -419,7 +461,10 @@ app_main()
  ├─ mqtt_client_init() + mqtt_commander_init() + mqtt_publisher_init()
  ├─ mqtt_client_start() + mqtt_publisher_start()
  ├─ ota_service_init() + ota_service_mark_valid()
- └─ event_bus_publish(EVENT_NODE_READY) → idle loop
+ ├─ event_bus_publish(EVENT_NODE_READY) → idle loop
+ └─ (background) wifi_status_task:
+        wifi_prov_wait_for_connection()  → logs, sets the status LED
+        net_services_start()             → NTP + mDNS (need an IP)
 ```
 
 Two ordering constraints matter and both were bugs during development:
@@ -432,8 +477,13 @@ Two ordering constraints matter and both were bugs during development:
    device — exactly the factory case.
 
 The HTTPS server starts **before** the station connects so the configuration UI is
-reachable through the provisioning SoftAP (`https://192.168.4.1/`). It keeps
-running afterwards. See limitation #1 about the missing authentication.
+reachable through the provisioning SoftAP (`https://192.168.4.1/`, SoftAP
+transport only). It keeps running afterwards. See limitation #1 about the
+missing authentication.
+
+`at_service_start()` also runs before the network, so a host MCU can talk to an
+as-yet-unprovisioned node. NTP and mDNS are the only services that wait for an
+address, and they wait inside a background task rather than in the boot path.
 
 ---
 
@@ -451,10 +501,44 @@ running afterwards. See limitation #1 about the missing authentication.
 | 8 | Test console assumes the auto-reset USB-serial wiring | `tools/espx_test.py` drives DTR/RTS | use a manual reset if your adapter differs |
 | 9 | With the **SoftAP** transport the config UI is reachable over the open provisioning AP | anyone in radio range can reconfigure the device during provisioning | default is BLE (no AP); set `wifi_ssid` via factory data so no provisioning AP is ever raised |
 | 10 | The BLE PoP is compiled in and defaults to `abcd1234` | the shared secret is the same on every unit | set `CONFIG_ESPX_PROV_POP` per production batch, and `CONFIG_ESPX_PROV_SHOW_POP_IN_QR=n` so printed QR codes omit it |
+| 11 | Internal RAM is only 345 KB and concurrent TLS sessions consume it | exhausting it makes the HTTPS server refuse every connection until reboot | see §12: 4 sockets, 4 KB TLS buffers, mbedTLS buffers in PSRAM |
 
 ---
 
-## 11. Source map
+## 12. Memory and TLS sizing
+
+The figures below are measured on the target and are the reason for several
+non-default settings.
+
+| Quantity | Value |
+|---|---|
+| Internal RAM (total) | **345 KB** — the pool that runs out |
+| Internal RAM free after boot | ~180 KB |
+| Internal RAM per TLS session | ~25 KB |
+| Lowest internal free under 4 concurrent requests | ~40 KB, recovers |
+| TLS handshake, ECDSA P-256 @240 MHz | ~0.5 s |
+| Subsequent request on the same connection | 12–30 ms |
+| TLS handshake with RSA-2048 | ~1.5 s |
+
+Three deliberate choices follow from this:
+
+1. **ECDSA P-256 certificate** (`tools/gen_certs.sh` default). An RSA-2048
+   private-key operation is orders of magnitude slower; it is the difference
+   between a responsive UI and a sluggish one.
+2. **TLS buffers in PSRAM** (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`) with
+   `MBEDTLS_SSL_IN_CONTENT_LEN` reduced to 4 KB. The 16 KB default is sized for
+   bulk transfer; this node serves small JSON.
+3. **`max_open_sockets = 4`.** Every socket is a whole TLS session. When internal
+   RAM runs out the failure is not graceful: `mbedtls_ssl_setup` returns
+   `PSA_ERROR_INSUFFICIENT_MEMORY` and the server refuses *every* subsequent
+   connection until reboot.
+
+`/api/system/info` and the WebSocket `state` message both report
+`ram.internal_free`, `ram.internal_min_free` (low-water mark) and `cpu.usage`.
+Only the internal figure is meaningful for capacity planning: the combined
+`free_heap` includes 8 MB of PSRAM and stays near-empty regardless.
+
+## 13. Source map
 
 ```
 main/
@@ -462,6 +546,8 @@ main/
 ├── CMakeLists.txt             source list + EMBED_FILES
 ├── Kconfig.projbuild          ESPX configuration
 ├── core/
+│   ├── app_info.h             build identity (single version source)
+│   ├── sys_stats.{c,h}        CPU load + RAM sampling
 │   ├── device_type.{c,h}      driver registry
 │   ├── device_manager.{c,h}   runtime device instances + NVS persistence
 │   ├── event_bus.{c,h}        pub/sub
@@ -479,10 +565,17 @@ main/
 │   └── mqtt_publisher.{c,h}   heartbeat + periodic sensors
 ├── web_server/
 │   ├── web_server.c           HTTPS + REST
+│   ├── ws_server.{c,h}        WebSocket /ws (live push + commands)
 │   └── web_files/index.html   single-page UI (embedded)
 ├── cert_manager/
 │   ├── cert_manager.{c,h}
 │   └── certs/server.{crt,key} build-time embedded PEM files
+├── net_services/
+│   ├── net_services.{c,h}     starts the IP-dependent services
+│   ├── time_sync.{c,h}        NTP
+│   └── mdns_service.{c,h}     mDNS / DNS-SD
+├── at_service/
+│   └── at_service.{c,h}       serial AT commands (ESP-AT style)
 ├── wifi_prov/                 SoftAP/BLE provisioning
 ├── ota_service/               delta OTA
 ├── mfg_provision/             factory data
@@ -494,5 +587,7 @@ tools/
 ├── make_delta_patch.py        build a delta OTA patch
 ├── espx_test.py               automated serial test harness
 ├── mini_mqtt_broker.py        dependency-free MQTT broker for local testing
+├── emqx_init.py               EMQX authenticator/user/ACL setup + MQTT verify
+├── network_tests.py           HTTPS/MQTT/YAML/OTA integration tests
 └── verify_device.sh           flash / monitor / log capture helpers
 ```

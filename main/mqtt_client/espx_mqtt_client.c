@@ -244,6 +244,35 @@ esp_err_t mqtt_client_publish(const char *subtopic, const char *data, size_t len
     return ESP_OK;
 }
 
+esp_err_t mqtt_client_publish_absolute(const char *topic, const char *data,
+                                       size_t len, int qos, bool retain)
+{
+    if (g_mqtt_client == NULL || !g_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, data, len, qos,
+                                         retain ? 1 : 0);
+    return msg_id >= 0 ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t mqtt_client_subscribe(const char *topic_filter, int qos)
+{
+    if (g_mqtt_client == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    int msg_id = esp_mqtt_client_subscribe(g_mqtt_client, topic_filter, qos);
+    return msg_id >= 0 ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t mqtt_client_unsubscribe(const char *topic_filter)
+{
+    if (g_mqtt_client == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    int msg_id = esp_mqtt_client_unsubscribe(g_mqtt_client, topic_filter);
+    return msg_id >= 0 ? ESP_OK : ESP_FAIL;
+}
+
 const char* mqtt_client_get_prefix(void)
 {
     return g_topic_prefix;

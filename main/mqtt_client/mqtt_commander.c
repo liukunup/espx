@@ -27,7 +27,6 @@
 #include "ota_service/ota_service.h"
 #include "test_mode/test_mode.h"
 #include "config_apply.h"
-#include "yaml.h"
 
 static const char *TAG = "mqtt_commander";
 
@@ -400,12 +399,21 @@ void mqtt_commander_handle(const char *topic, const char *payload, int payload_l
             handle_control(target, data);
         }
     } else if (topic_matches_cmd(topic, "config")) {
-        /* A YAML (or JSON) configuration document has no "action" member and is
-         * applied directly; a payload with "action" uses the legacy verbs. */
-        if (yaml_looks_like_yaml(payload)) {
-            handle_config_push(payload);
-        } else {
+        /* Route on CONTENT, not on the first character: a JSON object carrying
+         * an "action" key uses the introspection verbs, anything else is a
+         * configuration document (JSON or YAML) and is applied directly.
+         *
+         * Do not test "starts with '{'" here: flow-style YAML also starts with
+         * '{' and would be sent down the verb path by mistake. */
+        cJSON *probe = cJSON_Parse(payload);
+        bool is_action = cJSON_IsObject(probe) &&
+                         cJSON_GetObjectItem(probe, "action") != NULL;
+        cJSON_Delete(probe);
+
+        if (is_action) {
             handle_config(data);
+        } else {
+            handle_config_push(payload);
         }
     } else if (topic_matches_cmd(topic, "ota")) {
         handle_ota(data);

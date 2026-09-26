@@ -88,8 +88,15 @@ esp_err_t cert_manager_get_server_cert(server_cert_t *cert)
     memcpy(cert->key_pem, server_key_start, g_key_len);
     cert->key_pem[g_key_len] = '\0';
 
-    cert->cert_len = g_cert_len;
-    cert->key_len  = g_key_len;
+    /* The reported length MUST include the terminating NUL.
+     *
+     * mbedtls_x509_crt_parse() documents: "buflen: The size of buf, including
+     * the terminating NULL byte in case of PEM encoded data." esp-tls passes
+     * this length straight through, so excluding the NUL makes every TLS
+     * handshake fail with ESP_ERR_MBEDTLS_X509_CRT_PARSE_FAILED and the server
+     * resets each connection. */
+    cert->cert_len = g_cert_len + 1;
+    cert->key_len  = g_key_len + 1;
 
     return ESP_OK;
 }

@@ -9,10 +9,9 @@ menu "ESPX Configuration"
         default "ESPX"
         depends on ESPX
 
-    config FIRMWARE_VERSION
-        string "Firmware Version"
-        default "1.0.0"
-        depends on ESPX
+    # The firmware version lives in version.txt at the project root, which
+    # ESP-IDF compiles into the application descriptor. Keeping a second copy
+    # here would let the node identity and the OTA version disagree.
 
     config MFG_TEST_GPIO
         int "Manufacturing Test trigger GPIO (-1 = disabled)"
@@ -62,6 +61,124 @@ menu "ESPX Configuration"
         string "Default OTA Server URL"
         default ""
         depends on ESPX
+
+    choice ESPX_WIFI_PS
+        bool "Wi-Fi power save"
+        default ESPX_WIFI_PS_NONE
+        depends on ESPX
+        help
+            Modem sleep lets the radio doze between beacons, which saves power
+            but adds hundreds of milliseconds to every request: the device only
+            wakes on a DTIM beacon, so each TLS handshake (several round trips)
+            becomes slow and can even time out.
+
+            NONE  - no power save. Recommended for a mains-powered node that
+                    serves an HTTPS UI: sub-10 ms LAN latency.
+            MIN   - minimum modem sleep. Roughly 100-300 ms latency, clearly
+                    less current. Reasonable for a battery node that is only
+                    polled occasionally.
+
+        config ESPX_WIFI_PS_NONE
+            bool "None (lowest latency)"
+        config ESPX_WIFI_PS_MIN
+            bool "Minimum modem sleep (lower power)"
+    endchoice
+
+    # =====================================================================
+    # Serial AT interface
+    # =====================================================================
+
+    config ESPX_AT_ENABLE
+        bool "Serial AT command interface"
+        default y
+        depends on ESPX
+        help
+            ESP-AT style command interface on a dedicated UART. A host MCU can
+            commission and drive the node with AT commands; every mutating
+            command goes through the same configuration path as the Web API and
+            MQTT (see AGENT.md).
+
+            The command set is a documented SUBSET of ESP-AT, not the whole
+            command table. Run AT+HELP? for the supported list.
+
+    config ESPX_AT_UART_NUM
+        int "AT UART number"
+        range 0 2
+        default 1
+        depends on ESPX_AT_ENABLE
+        help
+            UART used for AT commands. Defaults to UART1 so the AT port and the
+            log / manufacturing console (UART0) stay independent.
+
+            Choosing 0 shares the port with the log output and the test-mode
+            console, where the two will interleave.
+
+    config ESPX_AT_UART_TX_GPIO
+        int "AT UART TX GPIO"
+        default 4
+        depends on ESPX_AT_ENABLE
+        help
+            ESP32-S3: avoid the strapping pins (0/3/45/46), the flash pins
+            (26-32), the octal PSRAM pins (33-37) and the USB pins (19/20).
+
+    config ESPX_AT_UART_RX_GPIO
+        int "AT UART RX GPIO"
+        default 5
+        depends on ESPX_AT_ENABLE
+
+    config ESPX_AT_UART_BAUD
+        int "AT UART baud rate"
+        default 115200
+        depends on ESPX_AT_ENABLE
+
+    # =====================================================================
+    # Network services (require an IP address)
+    # =====================================================================
+
+    config ESPX_NTP_SERVER
+        string "NTP server"
+        default "pool.ntp.org"
+        depends on ESPX
+        help
+            SNTP server used to set the clock once the station is connected.
+            A correct clock is needed for certificate validity checks and for
+            log timestamps that can be correlated across devices.
+
+    config ESPX_TZ
+        string "Timezone (POSIX TZ)"
+        default "CST-8"
+        depends on ESPX
+        help
+            POSIX TZ string, e.g. "CST-8" (China), "UTC0", "EST5EDT",
+            "AEST-10AEDT,M10.1.0,M4.1.0/3". Applied at boot.
+
+    # The mDNS name is the device id, lower-cased and sanitised, so it always
+    # matches the MQTT topic prefix. There is deliberately no separate prefix
+    # option: "<prefix><device_id>" duplicated the product prefix and produced
+    # names such as "espx-espx-84c7bb772e74.local".
+
+    config ESPX_MDNS_ADVERTISE_MQTT
+        bool "Also advertise _mqtt._tcp"
+        default n
+        depends on ESPX
+        help
+            Only useful when a broker runs on the node itself.
+
+    config ESPX_HTTPS_PORT
+        int "HTTPS server port"
+        default 443
+        depends on ESPX
+        help
+            Port the management interface and REST API listen on. Also used for
+            the advertised _https._tcp mDNS service.
+
+    config ESPX_WS_ENABLE
+        bool "WebSocket endpoint (/ws)"
+        default y
+        depends on ESPX
+        help
+            Push device state to browsers without polling, and accept
+            read/write/config commands over the socket.
 
     # =====================================================================
     # Wi-Fi provisioning

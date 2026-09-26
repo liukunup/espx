@@ -9,7 +9,9 @@
 #include <esp_timer.h>
 #include <nvs_flash.h>
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 
+#include "app_info.h"
 #include "led_driver.h"
 #include "event_bus.h"
 #include "device_type.h"
@@ -25,6 +27,9 @@
 #include "test_mode/test_mode.h"
 #include "mfg_provision/mfg_provision.h"
 #include "ota_service/ota_service.h"
+#include "net_services/net_services.h"
+#include "core/sys_stats.h"
+#include "at_service/at_service.h"
 
 static const char *TAG = "app_main";
 
@@ -33,7 +38,7 @@ static void print_banner(void)
     printf("\n================================================\n");
     printf("           ESPX IoT Device Firmware\n");
     printf("================================================\n");
-    printf("  Version  : %s\n", CONFIG_FIRMWARE_VERSION);
+    printf("  Version  : %s\n", app_version());
     printf("  Device   : %s\n", CONFIG_DEVICE_NAME);
     printf("  Chip     : ESP32-S3\n");
     printf("  Build    : %s %s\n", __DATE__, __TIME__);
@@ -48,6 +53,11 @@ static void wifi_status_task(void *arg)
     wifi_prov_wait_for_connection();
     ESP_LOGI(TAG, "Wi-Fi connected");
     led_set_status("connected");
+
+    /* NTP and mDNS need an address, so they start here rather than in the boot
+     * sequence (which must not block on the network). */
+    net_services_start();
+
     vTaskDelete(NULL);
 }
 
@@ -72,7 +82,16 @@ void app_main(void)
      * to reach test mode. */
     test_mode_start_longpress_watchdog();
 
-    /* ---- 3. Configuration ---------------------------------------------- */
+    /* ---- 3. Serial AT interface ----------------------------------------- */
+    /* Started before the network so a host MCU can talk to the node even while
+     * it is still unprovisioned. */
+#ifdef CONFIG_ESPX_AT_ENABLE
+    if (at_service_start() != ESP_OK) {
+        ESP_LOGW(TAG, "AT service failed to start");
+    }
+#endif
+
+    /* ---- 4. Configuration ---------------------------------------------- */
     ESP_LOGI(TAG, "Initializing configuration...");
     ESP_ERROR_CHECK(node_config_init());
     ESP_ERROR_CHECK(node_config_load());
@@ -129,6 +148,9 @@ void app_main(void)
     ESP_ERROR_CHECK(mqtt_publisher_start());
 
     /* ---- 10. OTA -------------------------------------------------------- */
+    /* Runtime statistics (CPU load, RAM) for /api/system/info and the UI. */
+    sys_stats_start();
+
     ESP_LOGI(TAG, "Initializing OTA service...");
     ESP_ERROR_CHECK(ota_service_init());
     /* This firmware booted; cancel any pending rollback. */
@@ -148,7 +170,14 @@ void app_main(void)
     xTaskCreate(wifi_status_task, "wifi_status", 3072, NULL, 3, NULL);
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(10000));
-        ESP_LOGD(TAG, "idle");
+        vTaskDelay(pdMS_TO_TICKS(30000));
+
+        /* Internal RAM is the pool that runs out (Wi-Fi, TLS sessions, PSA
+         * crypto); the headline free-heap figure includes PSRAM and hides it.
+         * Logging the minimum makes a leak or a slow exhaustion visible. */
+        ESP_LOGI(TAG, "heap: internal free %u, internal min %u, total free %u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)esp_get_free_heap_size());
     }
 }

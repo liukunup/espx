@@ -36,22 +36,26 @@ cJSON *config_parse_document(const char *payload, int *err_line)
         return NULL;
     }
 
-    if (yaml_looks_like_yaml(payload)) {
-        int line = 0;
-        const char *msg = NULL;
-        cJSON *doc = yaml_parse_ex(payload, &line, &msg);
-        if (doc == NULL) {
-            ESP_LOGE(TAG, "YAML parse error at line %d: %s", line, msg ? msg : "?");
-        }
-        if (err_line) *err_line = line;
+    if (err_line) *err_line = 0;
+
+    /* Try JSON first: it is unambiguous and cheap to reject.
+     *
+     * Do NOT discriminate on the first character. A YAML document written in
+     * flow style starts with '{' or '[' exactly like JSON, so "starts with a
+     * brace means JSON" misclassifies it and the document fails to parse. */
+    cJSON *doc = cJSON_Parse(payload);
+    if (doc != NULL) {
         return doc;
     }
 
-    if (err_line) *err_line = 0;
-    cJSON *doc = cJSON_Parse(payload);
+    int line = 0;
+    const char *msg = NULL;
+    doc = yaml_parse_ex(payload, &line, &msg);
     if (doc == NULL) {
-        ESP_LOGE(TAG, "JSON parse error");
+        ESP_LOGE(TAG, "payload is neither valid JSON nor YAML (line %d: %s)",
+                 line, msg ? msg : "?");
     }
+    if (err_line) *err_line = line;
     return doc;
 }
 
@@ -102,27 +106,40 @@ static bool merge_section(cJSON *target, const char *section,
             continue;
         }
 
+        /* node/network values are all textual. A YAML scalar that happens to
+         * look numeric (an all-digit password, a numeric device name) would
+         * otherwise be stored as a number and then silently ignored by the
+         * readers, which require a string. Coerce to text. */
+        cJSON *value = cJSON_IsString(item) ? cJSON_Duplicate((cJSON *)item, true)
+                                            : cJSON_CreateString(cJSON_IsTrue(item) ? "true"
+                                                 : cJSON_IsFalse(item) ? "false"
+                                                 : (char *)cJSON_PrintUnformatted((cJSON *)item));
+        if (value == NULL) {
+            ESP_LOGW(TAG, "Ignoring %s.%s (out of memory)", section, item->string);
+            continue;
+        }
+
         cJSON *prev = cJSON_GetObjectItem(dst, item->string);
         /* compare by rendered value to avoid rewriting identical config */
         char *a = prev ? cJSON_PrintUnformatted(prev) : NULL;
-        char *b = cJSON_PrintUnformatted((cJSON *)item);
+        char *b = cJSON_PrintUnformatted(value);
         bool same = (a && b && strcmp(a, b) == 0);
         free(a); free(b);
 
-        if (same) continue;
+        if (same) {
+            cJSON_Delete(value);
+            continue;
+        }
 
         if (prev) cJSON_DeleteItemFromObject(dst, item->string);
-        cJSON_AddItemToObject(dst, item->string, cJSON_Duplicate((cJSON *)item, true));
+        cJSON_AddItemToObject(dst, item->string, value);
         changed = true;
 
         if (is_secret(item->string)) {
             ESP_LOGI(TAG, "  %s.%s = <set>", section, item->string);
-        } else if (cJSON_IsString(item)) {
-            ESP_LOGI(TAG, "  %s.%s = %s", section, item->string, item->valuestring);
         } else {
-            char *v = cJSON_PrintUnformatted((cJSON *)item);
-            ESP_LOGI(TAG, "  %s.%s = %s", section, item->string, v ? v : "?");
-            free(v);
+            ESP_LOGI(TAG, "  %s.%s = %s", section, item->string,
+                     value->valuestring ? value->valuestring : "?");
         }
     }
 

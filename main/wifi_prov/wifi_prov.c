@@ -265,18 +265,18 @@ static esp_err_t custom_prov_data_handler(uint32_t session_id, const uint8_t *in
 }
 
 /**
- * @brief Connect using credentials pre-provisioned by factory data
+ * @brief Read the Wi-Fi credentials carried by node_config
  *
- * A factory-programmed unit should come up on the plant network without an
- * operator running SoftAP provisioning. If node_config carries
- * network.wifi_ssid (and password), configure the station directly.
+ * node_config.network.wifi_ssid is where the configuration channels (factory
+ * data, HTTPS, MQTT, AT) put credentials.
  *
- * @return true when credentials were found and the station was started
+ * @return true when an SSID is present
  */
-static bool start_with_preconfigured_credentials(void)
+static bool read_node_wifi(char *ssid, size_t ssid_len,
+                           char *password, size_t pass_len)
 {
-    char ssid[33] = {0};
-    char password[65] = {0};
+    ssid[0] = '\0';
+    password[0] = '\0';
 
     cJSON *cfg = node_config_get();
     if (cfg == NULL) {
@@ -287,35 +287,73 @@ static bool start_with_preconfigured_credentials(void)
     if (cJSON_IsObject(net)) {
         cJSON *v = cJSON_GetObjectItem(net, "wifi_ssid");
         if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-            strncpy(ssid, v->valuestring, sizeof(ssid) - 1);
+            strncpy(ssid, v->valuestring, ssid_len - 1);
         }
         v = cJSON_GetObjectItem(net, "wifi_password");
         if (cJSON_IsString(v)) {
-            strncpy(password, v->valuestring, sizeof(password) - 1);
+            strncpy(password, v->valuestring, pass_len - 1);
         }
     }
     cJSON_Delete(cfg);
 
-    if (ssid[0] == '\0') {
+    return ssid[0] != '\0';
+}
+
+/**
+ * @brief Start the station with credentials from node_config
+ *
+ * node_config is the AUTHORITATIVE source. The provisioning manager's stored
+ * Wi-Fi configuration is only a fallback: it is written once, by
+ * esp_wifi_set_config(), and the manager then reports the device as
+ * "provisioned" forever. If that path were taken preferentially, a later
+ * network.wifi_ssid change would be silently ignored — a device would keep
+ * using the old network with no error anywhere.
+ *
+ * @return true when the station was started from node_config
+ */
+static bool start_with_node_credentials(void)
+{
+    char ssid[33] = {0};
+    char password[65] = {0};
+
+    if (!read_node_wifi(ssid, sizeof(ssid), password, sizeof(password))) {
         return false;
     }
 
-    ESP_LOGI(TAG, "Using pre-provisioned Wi-Fi credentials for SSID '%s'", ssid);
-
-    wifi_config_t wc = {0};
-    strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
+    wifi_config_t desired = {0};
+    strncpy((char *)desired.sta.ssid, ssid, sizeof(desired.sta.ssid) - 1);
     if (password[0] != '\0') {
-        strncpy((char *)wc.sta.password, password, sizeof(wc.sta.password) - 1);
-        wc.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        strncpy((char *)desired.sta.password, password, sizeof(desired.sta.password) - 1);
+        desired.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     } else {
-        wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
+        desired.sta.threshold.authmode = WIFI_AUTH_OPEN;
     }
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                &prov_event_handler, NULL));
+    /* Report whether this actually changes anything, so a silent no-op is
+     * visible in the log. */
+    wifi_config_t current = {0};
+    bool same = (esp_wifi_get_config(WIFI_IF_STA, &current) == ESP_OK)
+                && strcmp((char *)current.sta.ssid, ssid) == 0
+                && strcmp((char *)current.sta.password, password) == 0;
+
+    ESP_LOGI(TAG, "Wi-Fi credentials from configuration: SSID '%s' (%s)",
+             ssid, same ? "already stored" : "applying change");
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    if (!same) {
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &desired));
+    }
     ESP_ERROR_CHECK(esp_wifi_start());
+
+#ifdef CONFIG_ESPX_WIFI_PS_NONE
+    /* Modem sleep costs 100-300 ms per request, which is painful for an HTTPS
+     * UI and can push a TLS handshake into timeout. */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    ESP_LOGI(TAG, "Wi-Fi power save disabled (low latency)");
+#else
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    ESP_LOGI(TAG, "Wi-Fi power save: minimum modem sleep");
+#endif
 
     return true;
 }
@@ -344,11 +382,20 @@ esp_err_t wifi_prov_init(void)
 
     s_wifi_event_group = xEventGroupCreate();
 
-    /* Register event handlers */
+    /* Register event handlers.
+     *
+     * IP_EVENT must be registered here, once, for BOTH paths: it is what sets
+     * WIFI_CONNECTED_EVENT. Without it wifi_prov_wait_for_connection() blocks
+     * forever and the connection is never reported, whether the device was
+     * provisioned interactively or came up with factory credentials. */
     ESP_ERROR_CHECK(esp_event_handler_register(NETWORK_PROV_EVENT, ESP_EVENT_ANY_ID,
                                                 &prov_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(PROTOCOMM_SECURITY_SESSION_EVENT,
                                                 ESP_EVENT_ANY_ID, &prov_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                &prov_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                &prov_event_handler, NULL));
 
     /* Wi-Fi netifs */
     esp_netif_create_default_wifi_sta();
@@ -397,9 +444,11 @@ esp_err_t wifi_prov_start(wifi_prov_event_handler_t *event_handler)
     ESP_ERROR_CHECK(network_prov_mgr_is_wifi_provisioned(&provisioned));
     s_provisioned = provisioned;
 
-    /* Factory-programmed credentials take precedence over interactive
-     * provisioning: no operator needed on the production line. */
-    if (!provisioned && start_with_preconfigured_credentials()) {
+    /* Credentials from the configuration are authoritative and take precedence
+     * over the provisioning manager's stored state, whether or not the device
+     * is already provisioned. This is what lets factory data pre-provision a
+     * unit AND lets a later network.wifi_ssid change take effect. */
+    if (start_with_node_credentials()) {
         network_prov_mgr_deinit();
         return ESP_OK;
     }
@@ -470,8 +519,7 @@ esp_err_t wifi_prov_start(wifi_prov_event_handler_t *event_handler)
 
         ESP_ERROR_CHECK(network_prov_mgr_deinit());
 
-        ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                    &prov_event_handler, NULL));
+        /* Event handlers are registered once in wifi_prov_init(). */
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
     }

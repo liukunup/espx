@@ -21,10 +21,13 @@ extern "C" {
  * @brief Server certificate structure
  */
 typedef struct {
-    char *cert_pem;    /**< PEM-encoded certificate */
-    char *key_pem;     /**< PEM-encoded private key */
-    size_t cert_len;   /**< Certificate length */
-    size_t key_len;    /**< Key length */
+    char *cert_pem;    /**< PEM-encoded certificate (NUL terminated) */
+    char *key_pem;     /**< PEM-encoded private key (NUL terminated) */
+    /** Length INCLUDING the terminating NUL, as mbedtls_x509_crt_parse()
+     *  requires for PEM input. Do not "fix" this by subtracting one: the TLS
+     *  handshake will fail. */
+    size_t cert_len;
+    size_t key_len;
 } server_cert_t;
 
 /**

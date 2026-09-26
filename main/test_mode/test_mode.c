@@ -18,6 +18,7 @@
 #include <nvs_flash.h>
 #include <cJSON.h>
 
+#include "app_info.h"
 #include "test_mode.h"
 #include "device_type.h"
 #include "device_manager.h"
@@ -642,7 +643,7 @@ void test_mode_enter(void)
     printf("================================================\n");
     printf("        ESPX MANUFACTURING TEST MODE\n");
     printf("================================================\n");
-    printf(" Firmware : %s\n", CONFIG_FIRMWARE_VERSION);
+    printf(" Firmware : %s\n", app_version());
     printf(" Build    : %s %s\n", __DATE__, __TIME__);
     printf(" Exit     : type 'exit' to reboot\n");
     printf("================================================\n");
@@ -669,16 +670,20 @@ void test_mode_enter(void)
 
     char line[CONSOLE_LINE_MAX];
 
-    while (1) {
-        printf("espx-test> ");
-        fflush(stdout);
+    printf("espx-test> ");
+    fflush(stdout);
 
+    while (1) {
         if (!console_read_line(line, sizeof(line))) {
+            /* No complete line yet. Do NOT reprint the prompt here: that
+             * spams it every poll interval. */
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
         if (line[0] == '\0') {
+            printf("espx-test> ");
+            fflush(stdout);
             continue;
         }
 
@@ -720,5 +725,8 @@ void test_mode_enter(void)
         } else {
             printf("Unknown command: '%s' (try 'help')\n", cmd);
         }
+
+        printf("espx-test> ");
+        fflush(stdout);
     }
 }

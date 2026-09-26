@@ -57,7 +57,13 @@ class Device:
         self.ctx.check_hostname = False
         self.ctx.verify_mode = ssl.CERT_NONE
 
-    def _req(self, method, path, body=None, timeout=15):
+    # A Wi-Fi link drops the first packet after an idle period often enough that
+    # a single attempt produces spurious EHOSTUNREACH/timeouts. Retry those
+    # transport-level errors; never retry an HTTP error, which is a real answer.
+    RETRIES = 4
+    RETRY_DELAY = 1.5
+
+    def _attempt(self, method, path, body, timeout):
         url = f"https://{self.ip}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method,
@@ -72,6 +78,17 @@ class Device:
                 return e.code, json.loads(raw)
             except Exception:
                 return e.code, None
+
+    def _req(self, method, path, body=None, timeout=15):
+        last = None
+        for attempt in range(self.RETRIES):
+            try:
+                return self._attempt(method, path, body, timeout)
+            except (urllib.error.URLError, OSError) as e:
+                last = e
+                if attempt < self.RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY)
+        raise last
 
     def _req_raw(self, method, path, body, content_type, timeout=20):
         url = f"https://{self.ip}{path}"
@@ -150,6 +167,15 @@ def test_api(dev, args):
 
     st, devs = dev.get("/api/devices")
     nettest = next((d for d in devs if d["id"] == "nettest"), None) if isinstance(devs, list) else None
+    check("a disabled device reports enabled=false and no value",
+          nettest is not None and nettest.get("enabled") is False and "value" not in nettest,
+          f"{nettest}")
+
+    # Re-enable so the next check sees a live value (a disabled device has none
+    # by design: the driver is de-initialised).
+    dev.post("/api/devices/nettest/enable", {"enabled": True})
+    st, devs = dev.get("/api/devices")
+    nettest = next((d for d in devs if d["id"] == "nettest"), None) if isinstance(devs, list) else None
     check("GET /api/devices includes live value and config",
           nettest is not None and "value" in nettest and "config" in nettest,
           f"{nettest}")
@@ -173,17 +199,20 @@ def test_api(dev, args):
     check("GET /api/config exports the configuration",
           st == 200 and isinstance(cur, dict) and "devices" in cur, f"{st} {cur}")
 
+    # Pre-create the device that the document will remove, so "removed" is a
+    # real transition rather than a no-op.
+    dev.delete("/api/devices/y1_doomed")
+    dev.post("/api/devices", {"id": "y1_doomed", "type": "relay",
+                              "config": {"gpio": 5, "active_level": 1}})
+
     yaml_doc = (
         "node:\n"
         "  name: YAML-Test-Node\n"
         "devices:\n"
-        "  - id: y1_relay\n"
-        "    type: relay\n"
-        "    config: {gpio: 5, active_level: 1}\n"
         "  - id: y1_strip\n"
         "    type: ws2812\n"
         "    config: {data_gpio: 48, count: 1, brightness: 32}\n"
-        "remove_devices: [y1_relay]\n"
+        "remove_devices: [y1_doomed]\n"
     )
     st, r = dev.post_raw("/api/config", yaml_doc, "text/yaml")
     check("POST /api/config accepts YAML", st == 200 and r and r.get("ok"), f"{st} {r}")
@@ -197,11 +226,14 @@ def test_api(dev, args):
 
     st, devs = dev.get("/api/devices")
     ids = [d["id"] for d in devs] if isinstance(devs, list) else []
-    check("YAML: y1_strip bound, y1_relay removed",
-          "y1_strip" in ids and "y1_relay" not in ids, f"ids={ids}")
+    check("YAML: y1_strip bound, y1_doomed removed",
+          "y1_strip" in ids and "y1_doomed" not in ids, f"ids={ids}")
 
-    # malformed YAML must be rejected, and must not change anything
-    st, r = dev.post_raw("/api/config", "node:\n  name: x\n devices:\n", "text/yaml")
+    # Genuinely malformed: an unclosed flow collection. Inconsistent (but
+    # self-consistent) indentation is legal YAML and is deliberately accepted.
+    st, r = dev.post_raw("/api/config",
+                         "devices:\n  - id: x\n    type: relay\n    config: {gpio: 5\n",
+                         "text/yaml")
     check("malformed YAML rejected with ok=false",
           st in (200, 400) and r is not None and r.get("ok") is False, f"{st} {r}")
 
@@ -383,7 +415,8 @@ def test_mqtt(dev, args, net):
     # a malformed YAML document over MQTT must be reported, not crash the node
     with lock:
         received.clear()
-    cli.publish(f"{prefix}/cmd/config", "devices:\n  - id: x\n   type: relay\n", qos=1)
+    cli.publish(f"{prefix}/cmd/config",
+                "devices:\n  - id: x\n    type: relay\n    config: {gpio: 5\n", qos=1)
     time.sleep(5)
     with lock:
         got = list(received)

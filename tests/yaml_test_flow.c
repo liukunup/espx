@@ -46,7 +46,14 @@ int main(void){
         "\"devices\":[{\"id\":\"temp_in\",\"type\":\"dht11\",\"config\":{\"gpio\":4,\"interval_ms\":5000}},"
         "{\"id\":\"relay_a\",\"type\":\"relay\",\"config\":{\"gpio\":5,\"active_level\":1}}],"
         "\"remove_devices\":[\"old1\",\"old2\"],\"replace_devices\":true}");
+    puts("root-level flow collections (the one-liner form)");
+    expect("root flow map", "{a: 1, b: two}\n", "{\"a\":1,\"b\":\"two\"}");
+    expect("root flow map nested", "{network: {wifi_ssid: Net, wifi_password: \"pw\"}}\n",
+           "{\"network\":{\"wifi_ssid\":\"Net\",\"wifi_password\":\"pw\"}}");
+    expect("root flow seq", "[1, 2, 3]\n", "[1,2,3]");
+    expect("root flow, trailing spaces", "{a: 1}   \n", "{\"a\":1}");
     puts("malformed flow must error, not silently become a string");
+    expect_err("root flow with trailing junk", "{a: 1} junk\n");
     expect_err("unclosed flow map", "a: {b: 1\n");
     expect_err("missing value", "a: {b:}\n");
     expect_err("trailing junk", "a: {b: 1} xxx\n");

@@ -26,6 +26,25 @@ bool mqtt_client_is_connected(void);
 esp_err_t mqtt_client_publish(const char *subtopic, const char *data, size_t len, int qos, bool retain);
 
 /**
+ * @brief Publish to an ABSOLUTE topic (no prefix added)
+ *
+ * Used by callers that own the whole topic path, such as the AT interface
+ * where the host supplies it.
+ */
+esp_err_t mqtt_client_publish_absolute(const char *topic, const char *data,
+                                       size_t len, int qos, bool retain);
+
+/**
+ * @brief Subscribe to an ABSOLUTE topic filter
+ */
+esp_err_t mqtt_client_subscribe(const char *topic_filter, int qos);
+
+/**
+ * @brief Unsubscribe from an ABSOLUTE topic filter
+ */
+esp_err_t mqtt_client_unsubscribe(const char *topic_filter);
+
+/**
  * @brief Get current topic prefix
  */
 const char* mqtt_client_get_prefix(void);

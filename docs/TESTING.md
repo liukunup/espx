@@ -414,6 +414,108 @@ window.
 
 ---
 
+### T2.5 mDNS discovery
+
+**Proves:** the node is reachable by name and advertises what it offers.
+
+```bash
+# macOS / Linux with avahi
+ping -c 3 espx-<mac>.local
+curl -k https://espx-<mac>.local/api/node | python3 -m json.tool
+
+# browse the advertised services
+dns-sd -B _https._tcp local.        # macOS
+avahi-browse -rt _https._tcp        # Linux
+```
+
+**Expect** the name to resolve and `_https._tcp` to be listed with the TXT
+records `id`, `model`, `version`.
+
+**Fail if:** the name does not resolve (`I (…) mdns: mDNS started: …` must be in
+the log), or the node has no IP (mDNS starts only after the connection).
+
+### T2.6 NTP clock
+
+**Proves:** the clock is set, which TLS certificate validation depends on.
+
+```bash
+curl -k https://$IP/api/system/info | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+print("time_synced", d["time_synced"], "time", d["time"], "epoch", d["epoch"])
+print("ntp", d["ntp_server"], "tz", d["timezone"])'
+```
+
+**Expect**
+
+```
+time_synced True time 2026-09-26T18:09:00+0800 epoch 1790419739
+ntp pool.ntp.org tz CST-8
+```
+
+and in the log `I (…) time_sync: Time synchronised: …`.
+
+**Fail if:** `time` is `null` after ~60 s (check the node can reach the NTP
+server; some networks block outbound UDP 123).
+
+### T2.7 WebSocket live push
+
+**Proves:** the UI receives state without polling, and commands work over the
+socket.
+
+```bash
+python3 - <<'EOF'
+import json, ssl, websocket          # pip install websocket-client
+ctx = ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
+ws = websocket.create_connection("wss://<device-ip>/ws", ssl=ctx)
+for _ in range(3):
+    print(json.loads(ws.recv())["type"])
+ws.send(json.dumps({"type":"read","id":"relay_a"}))
+print(ws.recv())
+ws.send(json.dumps({"type":"write","id":"relay_a","value":True}))
+print(ws.recv())
+ws.close()
+EOF
+```
+
+**Expect** `hello` then `state`, and a `result` after each command.
+
+Also confirm the push is **event driven**: with the socket open, flip a relay
+through the REST API and the `state` message must arrive immediately (not after
+the 1 s tick).
+
+**Fail if:** the handshake fails (check `CONFIG_HTTPD_WS_SUPPORT=y`), or the UI
+shows `poll` instead of `live`.
+
+### T2.8 Serial AT interface
+
+**Proves:** a host MCU can commission and drive the node over UART.
+
+AT runs on **UART1** (TX=GPIO4, RX=GPIO5, 115200). Connect a USB-TTL adapter,
+or temporarily set `CONFIG_ESPX_AT_UART_NUM=0` to test over the console UART
+(logs will interleave).
+
+```
+AT
+AT+GMR
+AT+ID
+AT+CFG?
+AT+CFG=devices: [{id: at_relay, type: relay, config: {gpio: 5}}]
+AT+DEV?
+AT+DEV="at_relay",true
+AT+DEV="at_relay"
+AT+SYSTIME?
+AT+HOSTNAME?
+AT+HELP?
+```
+
+**Expect** `\r\nOK\r\n` after each, `+DEV:"at_relay",{"state":true}` for the
+read, and `+ERROR:unsupported command "…"` for anything not in the table.
+
+**Fail if:** no response (UART pins/UART number), or a truncated command gets
+executed (the service discards overlong lines instead of running them).
+
+---
+
 ## P3 — delta OTA
 
 ### T3.1 Patch generation and format
@@ -600,6 +702,9 @@ Everything that does not need a network, in one command:
 ```bash
 # offline: boot, test mode, device registry, hardware self-test
 python3 tools/espx_test.py --port $ESPX_PORT all
+
+# serial AT smoke test (UART1 via a second adapter, or AT on UART0)
+#   see T2.8
 
 # host unit tests for the YAML parser
 tests/run_yaml_tests.sh
