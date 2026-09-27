@@ -12,6 +12,8 @@
 #include <esp_log.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
 #include <cJSON.h>
 
 #include "task_util.h"
@@ -26,6 +28,7 @@
 #include "net_services/time_sync.h"
 #include "net_services/mdns_service.h"
 #include "sys_stats.h"
+#include "ota_service.h"
 
 static const char *TAG = "ws_server";
 
@@ -74,6 +77,7 @@ static cJSON *build_state(void)
     }
 
     cJSON_AddNumberToObject(root, "uptime", (double)(esp_timer_get_time() / 1000000ULL));
+    cJSON_AddNumberToObject(root, "free_heap", (double)esp_get_free_heap_size());
     cJSON_AddNumberToObject(root, "epoch", (double)time_sync_epoch());
     char iso[32];
     if (time_sync_iso8601(iso, sizeof(iso)) == ESP_OK) {
@@ -102,19 +106,67 @@ static cJSON *build_state(void)
     sys_stats_get(&st);
     cJSON *cpu = cJSON_AddObjectToObject(root, "cpu");
     cJSON_AddNumberToObject(cpu, "freq_mhz", st.cpu_freq_mhz);
+    cJSON_AddNumberToObject(cpu, "cores", 2);  // ESP32-S3 is dual-core
     if (st.cpu_valid) cJSON_AddNumberToObject(cpu, "usage", (double)st.cpu_usage);
     cJSON_AddNumberToObject(cpu, "tasks", st.task_count);
 
     cJSON *ram = cJSON_AddObjectToObject(root, "ram");
     cJSON_AddNumberToObject(ram, "internal_free", (double)st.int_free);
+    cJSON_AddNumberToObject(ram, "internal_total", (double)st.int_total);
     cJSON_AddNumberToObject(ram, "internal_min_free", (double)st.int_min_free);
+    cJSON_AddNumberToObject(ram, "internal_largest", (double)st.int_largest);
     cJSON_AddNumberToObject(ram, "internal_used_pct",
                             (double)sys_stats_internal_used_pct(&st));
     if (st.psram_present) {
         cJSON_AddNumberToObject(ram, "psram_free", (double)st.psram_free);
+        cJSON_AddNumberToObject(ram, "psram_total", (double)st.psram_total);
         cJSON_AddNumberToObject(ram, "psram_used_pct",
                                 (double)sys_stats_psram_used_pct(&st));
     }
+
+    /* OTA status — only non-idle when an update is running */
+    ota_status_t ota;
+    ota_service_get_status(&ota);
+    if (ota.state != OTA_STATE_IDLE) {
+        cJSON *ota_json = cJSON_AddObjectToObject(root, "ota");
+        const char *state_names[] = {
+            [OTA_STATE_IDLE] = "idle",
+            [OTA_STATE_CONNECTING] = "connecting",
+            [OTA_STATE_DOWNLOADING] = "downloading",
+            [OTA_STATE_VERIFYING] = "verifying",
+            [OTA_STATE_APPLYING] = "applying",
+            [OTA_STATE_REBOOTING] = "rebooting",
+            [OTA_STATE_SUCCESS] = "success",
+            [OTA_STATE_FAILED] = "failed",
+        };
+        int s = (ota.state >= 0 && ota.state <= OTA_STATE_FAILED) ? ota.state : 0;
+        cJSON_AddStringToObject(ota_json, "state", state_names[s]);
+        cJSON_AddNumberToObject(ota_json, "progress", ota.progress);
+        cJSON_AddNumberToObject(ota_json, "bytes_read", ota.bytes_read);
+        cJSON_AddNumberToObject(ota_json, "total_size", ota.total_size);
+        cJSON_AddStringToObject(ota_json, "url", ota.url);
+        cJSON_AddStringToObject(ota_json, "error", ota.error);
+        cJSON_AddStringToObject(ota_json, "running_version", ota.running_version);
+    }
+
+    /* Wi-Fi state + IP — used by the Network tab and header */
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        cJSON_AddStringToObject(root, "wifi_ssid", (const char *)ap.ssid);
+        cJSON_AddNumberToObject(root, "wifi_rssi", ap.rssi);
+    }
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif) {
+        esp_netif_ip_info_t ip;
+        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), IPSTR, IP2STR(&ip.ip));
+            cJSON_AddStringToObject(root, "ip", buf);
+        }
+    }
+
+    /* NTP sync state — useful to show time source status */
+    cJSON_AddBoolToObject(root, "time_synced", time_sync_is_synced());
 
     return root;
 }

@@ -106,13 +106,15 @@ static esp_err_t api_node_handler(httpd_req_t *req)
             node = cJSON_AddObjectToObject(cfg, "node");
         }
 
-        const char *keys[] = { "name", "device_id" };
+        const char *keys[] = { "name" };
         for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
             cJSON *v = cJSON_GetObjectItem(incoming, keys[i]);
             if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
                 cJSON_ReplaceItemInObject(node, keys[i], cJSON_CreateString(v->valuestring));
             }
         }
+        /* device_id is intentionally ignored here — it is set at the factory
+         * and cannot be changed at runtime. Any incoming value is discarded. */
 
         esp_err_t err = node_config_set(cfg);
         cJSON_Delete(cfg);
@@ -572,17 +574,7 @@ static esp_err_t api_network_handler(httpd_req_t *req)
         cJSON *cfg = node_config_get();
         cJSON *net = cfg ? cJSON_GetObjectItem(cfg, "network") : NULL;
         cJSON *out = net ? cJSON_Duplicate(net, true) : cJSON_CreateObject();
-        if (cfg) {
-            // Include device_id for frontend convenience
-            cJSON *node = cJSON_GetObjectItem(cfg, "node");
-            if (node) {
-                cJSON *dev_id = cJSON_GetObjectItem(node, "device_id");
-                if (dev_id) {
-                    cJSON_AddItemToObject(out, "device_id", cJSON_Duplicate(dev_id, true));
-                }
-            }
-            cJSON_Delete(cfg);
-        }
+        if (cfg) cJSON_Delete(cfg);
         return send_json(req, out, 200);
     }
 

@@ -154,7 +154,14 @@ void app_main(void)
     ESP_ERROR_CHECK(mqtt_client_init());
     ESP_ERROR_CHECK(mqtt_commander_init());
     ESP_ERROR_CHECK(mqtt_publisher_init());
-    ESP_ERROR_CHECK(mqtt_client_start());
+    /* mqtt_client_start returns ESP_ERR_INVALID_ARG when broker is not configured;
+     * log but don't fail — the node can still run with web UI only. */
+    err = mqtt_client_start();
+    if (err == ESP_ERR_INVALID_ARG) {
+        ESP_LOGW(TAG, "MQTT disabled — configure broker to enable");
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "MQTT start failed: %s", esp_err_to_name(err));
+    }
     ESP_ERROR_CHECK(mqtt_publisher_start());
 
     /* ---- 10. OTA -------------------------------------------------------- */

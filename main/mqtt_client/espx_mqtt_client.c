@@ -169,6 +169,21 @@ esp_err_t mqtt_client_init(void)
     return ESP_OK;
 }
 
+/**
+ * @brief Check if the broker URL is the default/placeholder (unconfigured)
+ */
+static bool is_broker_unconfigured(const char *broker)
+{
+    if (broker == NULL || broker[0] == '\0') {
+        return true;
+    }
+    /* Treat the example.com placeholder as "not configured" */
+    if (strstr(broker, "broker.example.com") != NULL) {
+        return true;
+    }
+    return false;
+}
+
 esp_err_t mqtt_client_start(void)
 {
     if (g_started && g_mqtt_client != NULL) {
@@ -177,6 +192,13 @@ esp_err_t mqtt_client_start(void)
 
     // (Re)load configuration
     load_network_config();
+
+    /* Skip connection attempt if broker is not configured */
+    if (is_broker_unconfigured(g_broker)) {
+        ESP_LOGW(TAG, "MQTT broker not configured — skipping connection. "
+                      "Set mqtt_broker in /api/config or network config.");
+        return ESP_ERR_INVALID_ARG;
+    }
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = g_broker,
