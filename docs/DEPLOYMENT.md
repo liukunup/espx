@@ -113,12 +113,52 @@ tools/emqx_init.py --host <emqx-host> --admin-pass '<pw>' \
 > 注意：创建认证器会**关闭匿名访问**。若该 broker 上还有别的匿名客户端，
 > 加 `--no-authn` 只配 ACL 规则。
 
-### 3.3 权限收敛建议
+### 3.3 多节点隔离（推荐）
+
+节点的主题树不含设备 ID 叶子（是 `<prefix>/sensors`，不是
+`<prefix>/<id>/sensors`），所以**多台设备必须让前缀唯一**，否则会互相覆盖。
+
+固件默认前缀就是 `espx/<device_id>`（如 `espx/84c7bb772e74`），无需手改。
+
+broker 侧再加一层"只能动自己的主题"：
+
+```bash
+tools/emqx_init.py --host <emqx-host> --admin-pass '<dashboard密码>' \
+                   --device-user espx --device-pass '<设备密码>' \
+                   --topic-prefix espx --per-node \
+                   --monitor-user monitor --monitor-pass '<监控账号密码>' \
+                   --apply --json
+```
+
+- `--per-node` 把 ACL 主题写成 `espx/${clientid}/#`（设备的 clientid 就是它的
+  设备 ID），于是每台只能发布/订阅自己前缀下的主题。
+- `--monitor-user` 另建一个运维账号：可订阅 `espx/#`、可向 `espx/+/cmd/#`
+  下发命令。**严格隔离后设备账号看不到别人，监控/操作必须用它。**
+
+> ⚠️ EMQX 默认还挂着一个 `file` 授权源，其末条规则 `{allow, {security_profile,
+> legacy}}` 在 legacy 安全档下会**放行一切**，使上面的按 clientid 规则形同虚设。
+> 需要给它加显式兜底：
+>
+> ```
+> {allow, {username, {re, "^dashboard$"}}, subscribe, ["$SYS/#"]}.
+> {deny, all, subscribe, ["$SYS/#", {eq, "#"}, {eq, "+/#"}]}.
+> {deny, all}.
+> ```
+>
+> 改完清一次授权缓存：`DELETE /api/v5/authorization/cache`。
+> 若该 broker 上还有别的匿名客户端，改前先确认它们的授权别被一起收紧。
+
+> EMQX 6 的 ACL 写入 API 是 **POST** 到
+> `/authorization/sources/built_in_database/rules/users`，body 为**数组**
+> `[{"username":…,"rules":[…]}]`。用 PUT 会返回 204 但**不生效**——
+> `tools/emqx_init.py` 已按正确形式实现。
+
+### 3.4 权限收敛建议
 
 脚本给出的 ACL 遵循最小权限：设备只能发布自己的前缀、只能订阅自己的命令前缀。
 生产环境进一步收紧：
 
-- 用 `${clientid}` 占位符替代固定前缀，做到"只能发自己的主题"
+- 用 `${clientid}` 占位符替代固定前缀，做到"只能发自己的主题"（见 3.3）
 - ACL 里显式 `{deny, all}` 收尾，并把 `authorization.no_match` 保持 `deny`
 - 设备密码按批次或按台唯一，避免一台被攻破波及全网
 
@@ -307,6 +347,54 @@ mosquitto_sub -h $BROKER -t "$PREFIX/config/result" -C 1
 ```
 
 回执里 `reboot_required: true` 说明改了网络参数，需重启生效。
+
+### 8.4 MQTT 主题
+
+设备使用 **MQTT 5**，前缀默认为 `espx`（可在 `network.mqtt_topic_prefix` 改）。
+
+| 主题 | 方向 | 周期 | 说明 |
+|---|---|---|---|
+| `<prefix>/state` | 上行 | 30 s | 在线心跳，retained |
+| `<prefix>/status` | 上行 | 30 s | 节点监控快照（内存/CPU/时钟/Wi-Fi），retained |
+| `<prefix>/sensors` | 上行 | 10 s | 周期传感器读数 |
+| `<prefix>/attrs/<id>` | 上行 | 按需 | 查询响应 |
+| `<prefix>/cmd/control/<id>` | 下行 | — | `{"action":"set","value":…}` |
+| `<prefix>/cmd/query/<id>` | 下行 | — | `{"action":"get"}` |
+| `<prefix>/cmd/config` | 下行 | — | 下发 YAML 配置 |
+| `<prefix>/cmd/reboot` | 下行 | — | 重启 |
+
+### 8.5 MQTT 5 特性
+
+**User Properties** — 设备发出的每条消息都带这三个属性，便于按固件/型号做分组监控，
+而不必解析 payload：
+
+| key | 值 |
+|---|---|
+| `fw` | 固件版本（如 `1.0.8`） |
+| `model` | 芯片型号（如 `esp32s3`） |
+| `dev` | 设备 ID |
+
+**Message Expiry Interval** — 设备发出的消息带 300 s 过期时间。retained 的
+`state`/`status` 每 30 s 刷新，所以健康节点始终新鲜；节点若掉电，broker 会自动清掉
+陈旧的 retained 快照，而不是永远显示 "online"。
+
+**Topic Alias** — 设备订阅端自动与 broker 协商（EMQX 默认上限 65535）。首次发布某主题时
+携带完整主题名与别名，之后只发别名，用于压缩高频上行（`sensors`）的报文体积。别名随
+连接生命周期存在，每次重连重新协商。
+
+#### 下发控制命令时的过期时间
+
+设备的会话是 `clean_start = true`，即**断线重连不会重放离线期间排队的命令**，因此不会
+执行陈旧指令。若你的业务需要「短暂断线后仍要收到命令」，请把命令的发布端改为持久会话，
+并在下发时显式设置消息过期时间：
+
+```bash
+# MQTT 5 客户端下发，命令 60 s 未送达即作废
+mosquitto_pub -V 5 -h $BROKER \
+  -t "$PREFIX/cmd/control/relay_a" \
+  -m '{"action":"set","value":true}' \
+  -D publish message-expiry-interval 60
+```
 
 ---
 
