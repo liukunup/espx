@@ -7,6 +7,7 @@
 #include <string.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static const char *TAG = "i2c_bus";
 
@@ -56,7 +57,7 @@ esp_err_t esp_idf_i2c_init(int sda_gpio, int scl_gpio, uint32_t freq_hz,
     }
 
     i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = I2C_NUM_AUTO,
+        .i2c_port = -1,  /* auto-select port */
         .sda_io_num = sda_gpio,
         .scl_io_num = scl_gpio,
         .clk_source = I2C_CLK_SRC_DEFAULT,

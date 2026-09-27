@@ -15,6 +15,7 @@
 #include <cJSON.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/task.h>
 
 #include <esp_twai.h>
 #include <esp_twai_onchip.h>
