@@ -55,11 +55,16 @@ static bool extract_cmd_target(const char *topic, const char *cmd, char *out, si
     if (strncmp(p, cmd, cmd_len) != 0) return false;
     p += cmd_len;
 
-    // Skip '/'
-    if (*p != '/') return false;
-    p++;
+    // Skip '/' separator between cmd and device_id
+    if (*p == '/') {
+        p++;
+    } else if (*p != '\0') {
+        ESP_LOGD(TAG, "extract_cmd_target: no separator after cmd");
+        return false;
+    }
 
     // Copy rest to out
+    ESP_LOGD(TAG, "extract_cmd_target: extracted device_id='%s'", p);
     strncpy(out, p, out_size - 1);
     out[out_size - 1] = '\0';
     return true;
@@ -84,7 +89,20 @@ static bool topic_matches_cmd(const char *topic, const char *cmd)
     if (strncmp(p, "cmd/", 4) != 0) return false;
     p += 4;
 
-    return strncmp(p, cmd, strlen(cmd)) == 0;
+    size_t cmd_len = strlen(cmd);
+    ESP_LOGD(TAG, "topic_matches_cmd: comparing '%s' with cmd '%s' (len=%d)", p, cmd, (int)cmd_len);
+    if (strncmp(p, cmd, cmd_len) != 0) {
+        ESP_LOGD(TAG, "topic_matches_cmd: strncmp failed");
+        return false;
+    }
+    // Ensure cmd is a complete segment: next char must be '/' or end of string
+    char next = p[cmd_len];
+    ESP_LOGD(TAG, "topic_matches_cmd: next char after cmd is '%c' (0x%02x)", next ? next : '?', (unsigned char)next);
+    if (next != '/' && next != '\0') {
+        ESP_LOGD(TAG, "topic_matches_cmd: next char is not '/' or end-of-string");
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -118,6 +136,8 @@ static void handle_query(const char *device_id, cJSON *data)
  */
 static void handle_control(const char *device_id, cJSON *data)
 {
+    ESP_LOGI(TAG, "handle_control: device_id='%s'", device_id ? device_id : "NULL");
+
     if (device_id == NULL || strlen(device_id) == 0) {
         ESP_LOGW(TAG, "Control command missing device_id");
         return;
@@ -373,7 +393,8 @@ esp_err_t mqtt_commander_init(void)
 
 void mqtt_commander_handle(const char *topic, const char *payload, int payload_len)
 {
-    ESP_LOGI(TAG, "Handle command: %s", topic);
+    const char *prefix = mqtt_client_get_prefix();
+    ESP_LOGI(TAG, "Handle command: topic='%s' prefix='%s' payload_len=%d", topic, prefix, payload_len);
 
     // Parse payload
     cJSON *data = NULL;
@@ -391,11 +412,11 @@ void mqtt_commander_handle(const char *topic, const char *payload, int payload_l
     // Route based on topic
     char target[64];
 
-    if (topic_matches_cmd(topic, "query/")) {
+    if (topic_matches_cmd(topic, "query")) {
         if (extract_cmd_target(topic, "query", target, sizeof(target))) {
             handle_query(target, data);
         }
-    } else if (topic_matches_cmd(topic, "control/")) {
+    } else if (topic_matches_cmd(topic, "control")) {
         if (extract_cmd_target(topic, "control", target, sizeof(target))) {
             handle_control(target, data);
         }

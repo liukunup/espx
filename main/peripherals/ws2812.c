@@ -223,6 +223,8 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
         return ESP_ERR_INVALID_ARG;
     }
 
+    ESP_LOGI(TAG, "ws2812_write: dev=%s value=%s", dev->id, cJSON_PrintUnformatted((cJSON*)value));
+
     bool changed = false;
     uint8_t new_brightness = data->brightness;
 
