@@ -119,9 +119,8 @@ static esp_err_t buzzer_deinit(device_t *dev)
     buzzer_data_t *data = dev->driver_data;
     if (!data) return ESP_OK;
 
-    /* Stop and uninstall LEDC channel */
+    /* Stop the LEDC channel */
     ledc_stop(LEDC_LOW_SPEED_MODE, data->channel, 0);
-    ledc_del_channel(data->channel);
 
     /* Cancel and delete auto-off timer */
     if (data->auto_off_timer) {
