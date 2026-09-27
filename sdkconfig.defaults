@@ -129,6 +129,22 @@ CONFIG_LWIP_UDP_RECVMBOX_SIZE=4
 # take effect.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
+# TLS record buffers live in PSRAM instead of internal RAM. Internal RAM (~250 KB)
+# runs out fast; PSRAM has 8 MB. Without this, the 16 KB input record buffer alone
+# consumes ~6% of internal RAM per TLS session, and a handful of concurrent sessions
+# exhaust it — causing PSA_ERROR_INSUFFICIENT_MEMORY and the "session creation
+# failed" / esp-tls-mbedtls -0x008D errors seen in heap.log.
+#
+# NOTE: large PSRAM buffers (>16 KB threshold) are already allocated from PSRAM
+# via SPIRAM_MALLOC_ALWAYSINTERNAL, but the mbedtls session context itself and
+# smaller allocations still land in internal RAM without this.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Reduce TLS record buffer from 16 KB (bulk-transfer default) to 4 KB.
+# This device serves small JSON payloads; the extra 12 KB per session is wasted
+# internal RAM that directly causes the handshake failures and memory exhaustion.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
+
 # NOT enabled, deliberately: MBEDTLS_DYNAMIC_FREE_CONFIG_DATA.
 # Its own help text says "all certificate, private key and DHM data are freed so
 # users should register certificate and private key to ssl config object again".

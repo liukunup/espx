@@ -383,6 +383,8 @@ curl -k https://$HOST/api/system/info | python3 -m json.tool
 | `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` + `core/task_util.h` | 不碰 flash 的应用任务栈移入 PSRAM |
 | 精简 Wi-Fi 缓冲数量与 LwIP 窗口 | 载荷是小 JSON，默认值是按吞吐调的 |
 | `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | TLS 记录缓冲按需分配 |
+| `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` | TLS 会话上下文和握手缓冲走 PSRAM（内部 RAM 只有 250 KB，TLS 缓冲很容易把它耗尽导致 -0x008D/PSA_ERROR_INSUFFICIENT_MEMORY） |
+| `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096` | TLS 输入记录缓冲从 16 KB 减到 4 KB（默认 16 KB 是为大文件传输调的，这个设备只服务小 JSON，节省 12 KB/会话） |
 
 结果：启动空闲 129 → **170 KB**，压力低水位 40 → **123 KB**（关键余量 3 倍）。
 
