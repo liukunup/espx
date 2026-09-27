@@ -199,6 +199,8 @@ static esp_err_t ads1115_validate_config(const cJSON *config)
 static const device_type_t ads1115_driver = {
     .name = "ads1115",
     .description = "ADS1115 16-bit ADC (I2C)",
+    .description_zh = "ADS1115 模数转换器",
+    .save_state = false,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_PERIODIC | DEVICE_CAPABILITY_NOTIFY,
     .init = ads1115_init,
     .deinit = ads1115_deinit,

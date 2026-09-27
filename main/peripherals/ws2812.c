@@ -74,9 +74,9 @@ static esp_err_t ws2812_validate_config(const cJSON *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // count is optional (defaults to 1)
+    // count is optional (defaults to 1), max 32 for state persistence
     cJSON *count = cJSON_GetObjectItem(config, "count");
-    if (cJSON_IsNumber(count) && (count->valueint < 1 || count->valueint > 300)) {
+    if (cJSON_IsNumber(count) && (count->valueint < 1 || count->valueint > 32)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -93,9 +93,6 @@ static esp_err_t ws2812_init(device_t *dev, const cJSON *config)
     cJSON *data_gpio = cJSON_GetObjectItem(config, "din");
     cJSON *count = cJSON_GetObjectItem(config, "count");
     cJSON *brightness = cJSON_GetObjectItem(config, "brightness");
-    cJSON *r_cfg = cJSON_GetObjectItem(config, "r");
-    cJSON *g_cfg = cJSON_GetObjectItem(config, "g");
-    cJSON *b_cfg = cJSON_GetObjectItem(config, "b");
 
     ws2812_data_t *data = calloc(1, sizeof(ws2812_data_t));
     if (data == NULL) {
@@ -105,12 +102,9 @@ static esp_err_t ws2812_init(device_t *dev, const cJSON *config)
     data->data_gpio = cJSON_IsNumber(data_gpio) ? data_gpio->valueint : 48;
     data->count = cJSON_IsNumber(count) ? count->valueint : 1;
     data->brightness = cJSON_IsNumber(brightness) ? brightness->valueint : 255;
-    uint8_t init_r = cJSON_IsNumber(r_cfg) ? r_cfg->valueint : 0;
-    uint8_t init_g = cJSON_IsNumber(g_cfg) ? g_cfg->valueint : 0;
-    uint8_t init_b = cJSON_IsNumber(b_cfg) ? b_cfg->valueint : 0;
 
     if (data->count < 1) data->count = 1;
-    if (data->count > 300) data->count = 300;  // Safety limit
+    if (data->count > 32) data->count = 32;  // State persistence limit
 
     data->r_buf = calloc(data->count, sizeof(uint8_t));
     data->g_buf = calloc(data->count, sizeof(uint8_t));
@@ -122,12 +116,7 @@ static esp_err_t ws2812_init(device_t *dev, const cJSON *config)
         free(data);
         return ESP_ERR_NO_MEM;
     }
-    // Initialize buffers with saved color
-    for (int i = 0; i < data->count; i++) {
-        data->r_buf[i] = init_r;
-        data->g_buf[i] = init_g;
-        data->b_buf[i] = init_b;
-    }
+    // calloc already zeroed the buffers — all LEDs start off (black)
 
     led_strip_config_t strip_config = {
         .strip_gpio_num = data->data_gpio,
@@ -157,6 +146,33 @@ static esp_err_t ws2812_init(device_t *dev, const cJSON *config)
     led_strip_clear(data->strip);
 
     dev->driver_data = data;
+
+    // Restore state from NVS if available
+    if (dev->state != NULL) {
+        cJSON *pixels = cJSON_GetObjectItem(dev->state, "pixels");
+        cJSON *brightness = cJSON_GetObjectItem(dev->state, "brightness");
+        if (cJSON_IsArray(pixels)) {
+            int idx = 0;
+            cJSON *px;
+            cJSON_ArrayForEach(px, pixels) {
+                if (idx >= data->count) break;
+                cJSON *pr = cJSON_GetObjectItem(px, "r");
+                cJSON *pg = cJSON_GetObjectItem(px, "g");
+                cJSON *pb = cJSON_GetObjectItem(px, "b");
+                if (cJSON_IsNumber(pr) && cJSON_IsNumber(pg) && cJSON_IsNumber(pb)) {
+                    data->r_buf[idx] = (uint8_t)pr->valueint;
+                    data->g_buf[idx] = (uint8_t)pg->valueint;
+                    data->b_buf[idx] = (uint8_t)pb->valueint;
+                }
+                idx++;
+            }
+        }
+        if (cJSON_IsNumber(brightness)) {
+            data->brightness = (uint8_t)brightness->valueint;
+        }
+        apply_pixels(data);
+    }
+
     ESP_LOGI(TAG, "WS2812 initialized: gpio=%d, count=%d", data->data_gpio, data->count);
 
     return ESP_OK;
@@ -207,9 +223,8 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint8_t rv = 0, gv = 0, bv = 0;
-    int new_brightness = -1;
-    bool color_changed = false;
+    bool changed = false;
+    uint8_t new_brightness = data->brightness;
 
     // Simple form: {"r": 255, "g": 0, "b": 128, "brightness": 128}
     // Sets all pixels to the same color with optional brightness
@@ -218,71 +233,49 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
     cJSON *b = cJSON_GetObjectItem(value, "b");
     cJSON *brightness = cJSON_GetObjectItem(value, "brightness");
     if (cJSON_IsNumber(r) && cJSON_IsNumber(g) && cJSON_IsNumber(b)) {
-        rv = (uint8_t)r->valueint;
-        gv = (uint8_t)g->valueint;
-        bv = (uint8_t)b->valueint;
-        color_changed = true;
+        uint8_t rv = (uint8_t)r->valueint;
+        uint8_t gv = (uint8_t)g->valueint;
+        uint8_t bv = (uint8_t)b->valueint;
         for (int i = 0; i < data->count; i++) {
             data->r_buf[i] = rv;
             data->g_buf[i] = gv;
             data->b_buf[i] = bv;
         }
-        if (cJSON_IsNumber(brightness)) {
-            new_brightness = brightness->valueint;
-            data->brightness = new_brightness;
-        }
+        changed = true;
+        (void)gv; (void)bv;
+    }
+    if (cJSON_IsNumber(brightness)) {
+        new_brightness = (uint8_t)brightness->valueint;
+        data->brightness = new_brightness;
+        changed = true;
     }
 
     // Form 2: {"all": {"r":..,"g":..,"b":..}}
     cJSON *all = cJSON_GetObjectItem(value, "all");
-    if (cJSON_IsObject(all) && !color_changed) {
+    if (cJSON_IsObject(all)) {
         cJSON *r2 = cJSON_GetObjectItem(all, "r");
         cJSON *g2 = cJSON_GetObjectItem(all, "g");
         cJSON *b2 = cJSON_GetObjectItem(all, "b");
         if (cJSON_IsNumber(r2) && cJSON_IsNumber(g2) && cJSON_IsNumber(b2)) {
-            rv = (uint8_t)r2->valueint;
-            gv = (uint8_t)g2->valueint;
-            bv = (uint8_t)b2->valueint;
-            color_changed = true;
+            uint8_t rv = (uint8_t)r2->valueint;
+            uint8_t gv = (uint8_t)g2->valueint;
+            uint8_t bv = (uint8_t)b2->valueint;
             for (int i = 0; i < data->count; i++) {
                 data->r_buf[i] = rv;
                 data->g_buf[i] = gv;
                 data->b_buf[i] = bv;
             }
+            changed = true;
         }
     }
 
-    // Save color and brightness to config
-    if (color_changed || new_brightness >= 0) {
-        cJSON *cfg = (cJSON*)dev->config;
-        if (cfg != NULL) {
-            cJSON_DeleteItemFromObject(cfg, "r");
-            cJSON_DeleteItemFromObject(cfg, "g");
-            cJSON_DeleteItemFromObject(cfg, "b");
-            cJSON_AddNumberToObject(cfg, "r", rv);
-            cJSON_AddNumberToObject(cfg, "g", gv);
-            cJSON_AddNumberToObject(cfg, "b", bv);
-            if (new_brightness >= 0) {
-                cJSON_DeleteItemFromObject(cfg, "brightness");
-                cJSON_AddNumberToObject(cfg, "brightness", new_brightness);
-            }
-            device_manager_save();
-        }
-    }
-
-    // Apply pixels
-    esp_err_t err = apply_pixels(data);
-    if (err != ESP_OK) return err;
-
-    // Handle index-based writes separately (don't persist these)
-    // This runs after the global color is set above
+    // Handle index-based writes
     cJSON *index = cJSON_GetObjectItem(value, "index");
     if (cJSON_IsNumber(index)) {
         int idx = index->valueint;
         if (idx < 0 || idx >= data->count) {
             return ESP_ERR_INVALID_ARG;
         }
-        // Get color from top-level or use current buffer values
         cJSON *r3 = cJSON_GetObjectItem(value, "r");
         cJSON *g3 = cJSON_GetObjectItem(value, "g");
         cJSON *b3 = cJSON_GetObjectItem(value, "b");
@@ -290,10 +283,8 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
             data->r_buf[idx] = (uint8_t)r3->valueint;
             data->g_buf[idx] = (uint8_t)g3->valueint;
             data->b_buf[idx] = (uint8_t)b3->valueint;
-            return apply_pixels(data);
+            changed = true;
         }
-        // If no color specified, just apply current buffer to this index
-        return apply_pixels(data);
     }
 
     // Form 4: {"pixels": [{"r":..,"g":..,"b":..}, ...]}
@@ -310,22 +301,41 @@ static esp_err_t ws2812_write(device_t *dev, const cJSON *value)
                 data->r_buf[idx] = (uint8_t)pr->valueint;
                 data->g_buf[idx] = (uint8_t)pg->valueint;
                 data->b_buf[idx] = (uint8_t)pb->valueint;
+                changed = true;
             }
             idx++;
         }
-        return apply_pixels(data);
     }
 
-    return ESP_ERR_INVALID_ARG;
+    // Apply pixels
+    esp_err_t err = apply_pixels(data);
+    if (err != ESP_OK) return err;
+
+    // Save state to NVS if anything changed
+    if (changed) {
+        cJSON *state = cJSON_CreateObject();
+        cJSON *pixel_arr = cJSON_CreateArray();
+        for (int i = 0; i < data->count; i++) {
+            cJSON *px = cJSON_CreateObject();
+            cJSON_AddNumberToObject(px, "r", data->r_buf[i]);
+            cJSON_AddNumberToObject(px, "g", data->g_buf[i]);
+            cJSON_AddNumberToObject(px, "b", data->b_buf[i]);
+            cJSON_AddItemToArray(pixel_arr, px);
+        }
+        cJSON_AddItemToObject(state, "pixels", pixel_arr);
+        cJSON_AddNumberToObject(state, "brightness", data->brightness);
+        cJSON_Delete((cJSON*)dev->state);
+        dev->state = state;
+        device_manager_save();
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t ws2812_default_config(cJSON *config)
 {
     cJSON_AddNumberToObject(config, "din", 48);
     cJSON_AddNumberToObject(config, "count", 1);
-    cJSON_AddNumberToObject(config, "r", 0);
-    cJSON_AddNumberToObject(config, "g", 0);
-    cJSON_AddNumberToObject(config, "b", 0);
     cJSON_AddNumberToObject(config, "brightness", 255);
     return ESP_OK;
 }
@@ -333,6 +343,8 @@ static esp_err_t ws2812_default_config(cJSON *config)
 static const device_type_t ws2812_driver = {
     .name = "ws2812",
     .description = "WS2812 RGB LED strip",
+    .description_zh = "WS2812 RGB LED",
+    .save_state = true,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_NOTIFY,
     .init = ws2812_init,
     .deinit = ws2812_deinit,

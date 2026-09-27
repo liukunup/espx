@@ -51,7 +51,9 @@ typedef enum {
 typedef struct device_type {
     const char *name;
     const char *description;
+    const char *description_zh;
     uint32_t capabilities;
+    bool save_state;  /**< Whether to persist runtime state to NVS */
 
     /** Required: Initialize device instance */
     esp_err_t (*init)(device_t *dev, const cJSON *config);

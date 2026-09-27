@@ -245,6 +245,8 @@ static esp_err_t buzzer_default_config(cJSON *config)
 static const device_type_t buzzer_driver = {
     .name = "buzzer",
     .description = "Passive buzzer (PWM)",
+    .description_zh = "无源蜂鸣器",
+    .save_state = true,
     .capabilities = DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_READ,
     .init = buzzer_init,
     .deinit = buzzer_deinit,

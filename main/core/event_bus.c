@@ -21,6 +21,7 @@ const char* event_type_to_string(event_type_t type)
     case EVENT_DEVICE_VALUE_CHANGED: return "device_value_changed";
     case EVENT_NODE_READY: return "node_ready";
     case EVENT_NODE_RESET: return "node_reset";
+    case EVENT_CONFIG_CHANGED: return "config_changed";
     case EVENT_WIFI_CONNECTED: return "wifi_connected";
     case EVENT_WIFI_DISCONNECTED: return "wifi_disconnected";
     case EVENT_MQTT_CONNECTED: return "mqtt_connected";

@@ -137,6 +137,8 @@ static esp_err_t mcp4725_default_config(cJSON *config)
 static const device_type_t mcp4725_driver = {
     .name = "mcp4725",
     .description = "MCP4725 12-bit DAC (I2C)",
+    .description_zh = "MCP4725 数模转换器",
+    .save_state = true,
     .capabilities = DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_READ,
     .init = mcp4725_init,
     .deinit = mcp4725_deinit,

@@ -5,6 +5,7 @@
  * Periodically publishes:
  *   - Heartbeat (state topic)
  *   - Sensor readings (sensors topic)
+ *   - Node status: heap, RAM, CPU, clock, Wi-Fi (status topic)
  */
 
 #include <stdio.h>
@@ -19,13 +20,16 @@
 #include "task_util.h"
 #include "mqtt_publisher.h"
 #include "espx_mqtt_client.h"
+#include "node_config.h"
 #include "device_manager.h"
 #include "device_type.h"
+#include "sys_info.h"
 
 static const char *TAG = "mqtt_publisher";
 
 #define HEARTBEAT_INTERVAL_S 30
 #define SENSOR_INTERVAL_S    10
+#define STATUS_INTERVAL_S    30
 
 static TaskHandle_t g_task = NULL;
 static volatile bool g_running = false;
@@ -34,6 +38,7 @@ static void publisher_task(void *arg)
 {
     int64_t last_heartbeat = 0;
     int64_t last_sensor = 0;
+    int64_t last_status = 0;
 
     while (g_running) {
         int64_t now = esp_timer_get_time();
@@ -41,9 +46,12 @@ static void publisher_task(void *arg)
         // Heartbeat
         if (now - last_heartbeat > HEARTBEAT_INTERVAL_S * 1000000LL) {
             if (mqtt_client_is_connected()) {
-                char payload[128];
+                /* Same shape as the connect-time announcement: a consumer must
+                 * not have to handle two different schemas for one topic. */
+                char payload[160];
                 snprintf(payload, sizeof(payload),
-                         "{\"online\":true,\"uptime\":%lu}",
+                         "{\"online\":true,\"device_id\":\"%s\",\"uptime\":%lu}",
+                         node_config_get_device_id(),
                          (unsigned long)(now / 1000000));
                 mqtt_client_publish("state", payload, strlen(payload), 1, true);
             }
@@ -76,6 +84,23 @@ static void publisher_task(void *arg)
                 cJSON_Delete(sensors);
             }
             last_sensor = now;
+        }
+
+        // Node status: heap, RAM, CPU, clock, Wi-Fi. Retained so a dashboard
+        // that connects between reports still sees the latest snapshot.
+        if (now - last_status > STATUS_INTERVAL_S * 1000000LL) {
+            if (mqtt_client_is_connected()) {
+                cJSON *status = sys_info_build();
+                if (status != NULL) {
+                    char *json_str = cJSON_PrintUnformatted(status);
+                    if (json_str) {
+                        mqtt_client_publish("status", json_str, strlen(json_str), 1, true);
+                        free(json_str);
+                    }
+                    cJSON_Delete(status);
+                }
+            }
+            last_status = now;
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));

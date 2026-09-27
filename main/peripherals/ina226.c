@@ -221,6 +221,8 @@ static esp_err_t ina226_default_config(cJSON *config)
 static const device_type_t ina226_driver = {
     .name = "ina226",
     .description = "INA226 power monitor (I2C)",
+    .description_zh = "INA226 功率监测器",
+    .save_state = false,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_PERIODIC | DEVICE_CAPABILITY_NOTIFY,
     .init = ina226_init,
     .deinit = ina226_deinit,

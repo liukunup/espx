@@ -186,6 +186,8 @@ static esp_err_t dht11_default_config(cJSON *config)
 static const device_type_t dht11_driver = {
     .name = "dht11",
     .description = "DHT11 temperature & humidity sensor",
+    .description_zh = "DHT11 温湿度传感器",
+    .save_state = false,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_PERIODIC,
     .init = dht11_init,
     .deinit = dht11_deinit,

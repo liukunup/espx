@@ -87,6 +87,13 @@ CONFIG_ESPX_TZ="CST-8"
 CONFIG_ESPX_MDNS_ADVERTISE_MQTT=n
 CONFIG_ESPX_WS_ENABLE=y
 
+# --- MQTT: protocol 5.0 ---
+# EMQX 6.x and every current broker speak MQTT 5; it adds reason codes (exact
+# failure diagnosis instead of a bare 0x04/0x05), user properties, message
+# expiry, shared subscriptions and topic aliases. 3.1.1 stays compiled in so a
+# legacy broker can still be reached by clearing session.protocol_ver.
+CONFIG_MQTT_PROTOCOL_5=y
+
 # --- OTA rollback: allow rollback on boot failure ---
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 

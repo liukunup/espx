@@ -65,6 +65,19 @@ bool mfg_provision_has_data(void)
 /**
  * @brief Apply node identity + network settings from factory JSON
  */
+/**
+ * @brief Upsert a string key into a JSON object.
+ *
+ * cJSON_ReplaceItemInObject() ignores keys that do not already exist, which
+ * silently drops first-time settings such as wifi_ssid.
+ */
+static void json_set_string(cJSON *obj, const char *key, const char *value)
+{
+    if (obj == NULL || key == NULL || value == NULL) return;
+    cJSON_DeleteItemFromObject(obj, key);
+    cJSON_AddStringToObject(obj, key, value);
+}
+
 static void apply_node_section(cJSON *node)
 {
     if (!cJSON_IsObject(node)) return;
@@ -83,7 +96,7 @@ static void apply_node_section(cJSON *node)
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         cJSON *v = cJSON_GetObjectItem(node, keys[i]);
         if (cJSON_IsString(v)) {
-            cJSON_ReplaceItemInObject(cur_node, keys[i], cJSON_CreateString(v->valuestring));
+            json_set_string(cur_node, keys[i], v->valuestring);
             ESP_LOGI(TAG, "  node.%s = %s", keys[i], v->valuestring);
         }
     }
@@ -103,7 +116,7 @@ static void apply_node_section(cJSON *node)
         for (size_t i = 0; i < sizeof(net_keys) / sizeof(net_keys[0]); i++) {
             cJSON *v = cJSON_GetObjectItem(network, net_keys[i]);
             if (cJSON_IsString(v)) {
-                cJSON_ReplaceItemInObject(cur_net, net_keys[i], cJSON_CreateString(v->valuestring));
+                json_set_string(cur_net, net_keys[i], v->valuestring);
                 /* Never log credentials */
                 if (strstr(net_keys[i], "password") != NULL) {
                     ESP_LOGI(TAG, "  network.%s = <set>", net_keys[i]);

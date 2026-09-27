@@ -16,6 +16,7 @@
 
 #include "app_info.h"
 #include "node_config.h"
+#include "event_bus.h"
 
 static const char *TAG = "node_config";
 
@@ -117,10 +118,12 @@ esp_err_t node_config_save(void)
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %s", esp_err_to_name(err));
         free(json_str);
         return err;
     }
 
+    size_t len = strlen(json_str);
     err = nvs_set_str(nvs, NVS_KEY_CONFIG, json_str);
     if (err == ESP_OK) {
         err = nvs_commit(nvs);
@@ -128,6 +131,7 @@ esp_err_t node_config_save(void)
     nvs_close(nvs);
     free(json_str);
 
+    ESP_LOGI(TAG, "node_config_save: result=%s, len=%u", esp_err_to_name(err), (unsigned)len);
     return err;
 }
 
@@ -172,7 +176,11 @@ esp_err_t node_config_set(const cJSON *config)
         }
     }
 
-    return node_config_save();
+    esp_err_t err = node_config_save();
+    if (err == ESP_OK) {
+        event_bus_publish(EVENT_CONFIG_CHANGED, NULL, NULL);
+    }
+    return err;
 }
 
 const char* node_config_get_device_id(void)

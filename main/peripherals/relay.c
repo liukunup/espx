@@ -115,6 +115,8 @@ static esp_err_t relay_default_config(cJSON *config)
 static const device_type_t relay_driver = {
     .name = "relay",
     .description = "GPIO-controlled relay",
+    .description_zh = "继电器",
+    .save_state = true,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_NOTIFY,
     .init = relay_init,
     .deinit = relay_deinit,

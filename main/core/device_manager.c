@@ -29,6 +29,11 @@ static const char *TAG = "device_manager";
 static struct device *g_devices[MAX_DEVICES];
 static size_t g_device_count = 0;
 static TaskHandle_t g_tick_task = NULL;
+
+/* While true, device_manager_save() is a no-op. Loading restores actuator
+ * state by calling device_write(), which makes drivers save; persisting at
+ * that point would write the partially loaded list and truncate NVS. */
+static bool g_loading = false;
 static bool g_running = false;
 
 /**
@@ -164,6 +169,11 @@ esp_err_t device_manager_load(void)
         return ESP_FAIL;
     }
 
+    /* Restoring actuator state below calls device_write(), which makes drivers
+     * persist. Suppress those saves so the in-progress (partial) device list
+     * cannot overwrite the complete one still stored in NVS. */
+    g_loading = true;
+
     cJSON *array = cJSON_GetObjectItem(root, "devices");
     if (cJSON_IsArray(array)) {
         cJSON *item;
@@ -184,10 +194,20 @@ esp_err_t device_manager_load(void)
             if (enabled != NULL && cJSON_IsBool(enabled) && !cJSON_IsTrue(enabled)) {
                 device_set_enabled(id->valuestring, false);
             }
+
+            /* Restore state for actuators */
+            cJSON *state = cJSON_GetObjectItem(item, "state");
+            if (state != NULL) {
+                device_t *dev = device_get(id->valuestring);
+                if (dev != NULL && dev->type->save_state) {
+                    device_write(id->valuestring, state);
+                }
+            }
         }
     }
 
     cJSON_Delete(root);
+    g_loading = false;
 
     ESP_LOGI(TAG, "Loaded %u peripheral(s) from NVS", (unsigned)g_device_count);
     return ESP_OK;
@@ -195,6 +215,12 @@ esp_err_t device_manager_load(void)
 
 esp_err_t device_manager_save(void)
 {
+    if (g_loading) {
+        // Loading restores state by writing devices; ignore the resulting saves
+        // so the partial list never overwrites the full one in NVS.
+        return ESP_OK;
+    }
+
     cJSON *array = cJSON_CreateArray();
 
     for (size_t i = 0; i < g_device_count; i++) {
@@ -212,15 +238,26 @@ esp_err_t device_manager_save(void)
             cJSON_AddItemToObject(item, "config", cfg_copy);
         }
 
+        // Save state only for actuators (save_state = true)
+        if (dev->type->save_state && dev->state != NULL) {
+            cJSON *st_copy = cJSON_Duplicate((cJSON*)dev->state, true);
+            cJSON_AddItemToObject(item, "state", st_copy);
+        }
+
         cJSON_AddItemToArray(array, item);
     }
 
-    char *json_str = cJSON_PrintUnformatted(array);
-    cJSON_Delete(array);
+    // Wrap array in an object with "devices" key for forward compatibility
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "devices", array);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
 
     if (json_str == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    ESP_LOGI(TAG, "Saving peripherals to NVS: %s", json_str);
 
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -497,6 +534,7 @@ esp_err_t device_get_json_array(cJSON *array)
         cJSON_AddStringToObject(item, "id", dev->id);
         cJSON_AddStringToObject(item, "type", dev->type->name);
         cJSON_AddStringToObject(item, "description", dev->type->description);
+        cJSON_AddStringToObject(item, "description_zh", dev->type->description_zh);
         cJSON_AddBoolToObject(item, "enabled", dev->enabled);
         cJSON_AddNumberToObject(item, "capabilities", dev->type->capabilities);
         cJSON_AddBoolToObject(item, "initialized", dev->initialized);
@@ -525,6 +563,7 @@ esp_err_t device_get_json(const char *id, cJSON *obj)
     cJSON_AddStringToObject(obj, "id", dev->id);
     cJSON_AddStringToObject(obj, "type", dev->type->name);
     cJSON_AddStringToObject(obj, "description", dev->type->description);
+    cJSON_AddStringToObject(obj, "description_zh", dev->type->description_zh);
     cJSON_AddBoolToObject(obj, "enabled", dev->enabled);
     cJSON_AddBoolToObject(obj, "initialized", dev->initialized);
 

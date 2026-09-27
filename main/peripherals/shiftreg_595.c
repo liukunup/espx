@@ -210,6 +210,8 @@ static esp_err_t shiftreg_default_config(cJSON *config)
 static const device_type_t shiftreg_driver = {
     .name = "shiftreg_595",
     .description = "74HC595 cascadable shift register output",
+    .description_zh = "74hc595 移位寄存器",
+    .save_state = true,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_NOTIFY,
     .init = shiftreg_init,
     .deinit = shiftreg_deinit,

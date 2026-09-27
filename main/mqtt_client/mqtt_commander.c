@@ -324,6 +324,7 @@ static void handle_config(cJSON *data)
             cJSON *item = cJSON_CreateObject();
             cJSON_AddStringToObject(item, "name", t->name);
             cJSON_AddStringToObject(item, "description", t->description);
+            cJSON_AddStringToObject(item, "description_zh", t->description_zh);
             cJSON_AddNumberToObject(item, "capabilities", t->capabilities);
 
             cJSON *default_config = cJSON_CreateObject();

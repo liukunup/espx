@@ -56,6 +56,9 @@ button:disabled,input:disabled{opacity:.6;cursor:not-allowed;background:#f3f4f6}
 #btn-ota-start{background:#2563eb!important;color:#fff!important}
 .btn-s{background:var(--bg);color:var(--text);border:1px solid var(--border)}
 .btn-s:hover{border-color:var(--p)}
+/* RGB quick-color buttons keep their own background; no hover border */
+.btn-rgb{border:1px solid var(--border)}
+.btn-rgb:hover{border-color:var(--border)}
 .btn-d{background:var(--err);color:#fff}
 .btns{display:flex;gap:.4rem;flex-wrap:wrap}
 input,select{padding:.5rem .6rem;border:1px solid var(--border);border-radius:.4rem;
@@ -285,7 +288,7 @@ input[type="color"] { cursor:pointer }
 <div id="modal" class="modal">
   <div class="modal-box">
     <h3>Add peripheral</h3>
-    <div class="fg"><label>Peripheral ID</label><input id="m-id" placeholder="e.g. temp_01"></div>
+    <div class="fg"><label>ID</label><input id="m-id" placeholder="e.g. temp_01"></div>
     <div class="fg"><label>Type</label><select id="m-type"></select></div>
     <div id="m-cfg"></div>
     <div class="btns" style="margin-top:1rem">
@@ -324,7 +327,7 @@ const I18N = {
     // dashboard - live
     live_values: 'Live values', refresh: 'Refresh', loading: 'Loading…', no_devices_bound: 'No peripherals bound.',
     // devices
-    bound_devices: 'Bound peripherals', add_device: '+ Add peripheral', device_id_label: 'Peripheral ID', type: 'Type',
+    bound_devices: 'Bound peripherals', add_device: '+ Add peripheral', device_id_label: 'ID', type: 'Type',
     bound_peripherals: 'Bound peripherals', add_peripheral: '+ Add peripheral',
     enabled: 'enabled', disabled: 'disabled', read: 'Read', disable: 'Disable', enable: 'Enable',
     setup: 'Setup', delete: 'Delete', delete_confirm: 'Delete peripheral "{0}"?',
@@ -395,7 +398,7 @@ const I18N = {
     // dashboard - live
     live_values: '实时数值', refresh: '刷新', loading: '加载中…', no_devices_bound: '未绑定外设。',
     // devices
-    bound_devices: '已绑定外设', add_device: '+ 添加外设', device_id_label: '外设 ID', type: '类型',
+    bound_devices: '已绑定外设', add_device: '+ 添加外设', device_id_label: 'ID', type: '类型',
     bound_peripherals: '已绑定外设', add_peripheral: '+ 添加外设',
     enabled: '已启用', disabled: '已禁用', read: '读取', disable: '禁用', enable: '启用',
     setup: '设置', delete: '删除', delete_confirm: '删除外设 "{0}"？',
@@ -558,9 +561,23 @@ function applyLang() {
   document.querySelectorAll('#modal .fg label')[1].textContent = t('type');
   document.getElementById('m-save').textContent = t('add');
   document.getElementById('m-cancel').textContent = t('cancel');
-  document.querySelector('#setup-modal .modal-box h3').textContent = t('setup_title');
+  // Preserve the <span id="setup-name"> inside the h3
+  const setupH3 = document.querySelector('#setup-modal .modal-box h3');
+  if (setupH3) {
+    setupH3.childNodes[0].textContent = t('setup_title');
+  }
   document.getElementById('setup-save').textContent = t('save');
   document.getElementById('setup-cancel').textContent = t('cancel');
+  // refresh peripheral type dropdown
+  const sel = document.getElementById('m-type');
+  if (sel && sel.innerHTML) {
+    const current = sel.value;
+    sel.innerHTML = TYPES.map(t => {
+      const desc = _lang === 'zh' && t.description_zh ? t.description_zh : t.description;
+      return `<option value="${esc(t.name)}">${esc(desc)}</option>`;
+    }).join('');
+    sel.value = current;
+  }
 }
 
 /* ---------- helpers ---------- */
@@ -780,9 +797,9 @@ async function loadPeripherals() {
           </div>
           <div class="btns">
             ${d.type === 'ws2812' ? `
-              <button class="btn-s" style="background:#ff0000;color:#fff" onclick="quickWrite('${esc(d.id)}', '#ff0000')">${t('quick_red')}</button>
-              <button class="btn-s" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
-              <button class="btn-s" style="background:#0066ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0066ff')">${t('quick_blue')}</button>
+              <button class="btn-rgb" style="background:#ff0000;color:#fff" onclick="quickWrite('${esc(d.id)}', '#ff0000')">${t('quick_red')}</button>
+              <button class="btn-rgb" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
+              <button class="btn-rgb" style="background:#0000ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0000ff')">${t('quick_blue')}</button>
               <button class="btn-s" onclick="quickWrite('${esc(d.id)}', '#000000')">${t('quick_off')}</button>
               <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
             ` : `
@@ -819,9 +836,9 @@ async function loadDevices() {
       </div>
       <div class="btns">
         ${d.type === 'ws2812' ? `
-          <button class="btn-s" style="background:#ff0000;color:#fff" onclick="quickWrite('${esc(d.id)}', '#ff0000')">${t('quick_red')}</button>
-          <button class="btn-s" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
-          <button class="btn-s" style="background:#0066ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0066ff')">${t('quick_blue')}</button>
+          <button class="btn-rgb" style="background:#ff0000;color:#fff" onclick="quickWrite('${esc(d.id)}', '#ff0000')">${t('quick_red')}</button>
+          <button class="btn-rgb" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
+          <button class="btn-rgb" style="background:#0000ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0000ff')">${t('quick_blue')}</button>
           <button class="btn-s" onclick="quickWrite('${esc(d.id)}', '#000000')">${t('quick_off')}</button>
           <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
         ` : `
@@ -855,11 +872,9 @@ let gSetupDeviceId = null;
 let gSetupType = null;
 
 async function openSetup(id, type) {
-  console.log('openSetup called:', id, type);
   const nameEl = document.getElementById('setup-name');
   const contentEl = document.getElementById('setup-content');
   const modal = document.getElementById('setup-modal');
-  console.log('Elements:', nameEl, contentEl, modal);
   if (!nameEl || !contentEl) { console.error('Modal elements not found!'); return; }
   gSetupDeviceId = id;
   gSetupType = type;
@@ -892,9 +907,9 @@ async function openSetup(id, type) {
         </div>
       </div>
       <div class="btns" style="margin-bottom:.7rem">
-        <button class="btn-s" style="background:#ff0000;color:#fff" onclick="setQuickColor('#ff0000')">${t('quick_red')}</button>
-        <button class="btn-s" style="background:#00ff00;color:#fff" onclick="setQuickColor('#00ff00')">${t('quick_green')}</button>
-        <button class="btn-s" style="background:#0000ff;color:#fff" onclick="setQuickColor('#0066ff')">${t('quick_blue')}</button>
+        <button class="btn-rgb" style="background:#ff0000;color:#fff" onclick="setQuickColor('#ff0000')">${t('quick_red')}</button>
+        <button class="btn-rgb" style="background:#00ff00;color:#fff" onclick="setQuickColor('#00ff00')">${t('quick_green')}</button>
+        <button class="btn-rgb" style="background:#0000ff;color:#fff" onclick="setQuickColor('#0000ff')">${t('quick_blue')}</button>
         <button class="btn-s" onclick="setQuickColor('#000000')">${t('quick_off')}</button>
       </div>
       <div class="fg"><label>${t('brightness')} <span id="setup-bright-val">128</span></label>
@@ -991,7 +1006,10 @@ const modal = document.getElementById('modal');
 
 document.getElementById('btn-add').addEventListener('click', () => {
   const sel = document.getElementById('m-type');
-  sel.innerHTML = TYPES.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.description)}</option>`).join('');
+  sel.innerHTML = TYPES.map(t => {
+    const desc = _lang === 'zh' && t.description_zh ? t.description_zh : t.description;
+    return `<option value="${esc(t.name)}">${esc(desc)}</option>`;
+  }).join('');
   document.getElementById('m-id').value = '';
   renderCfg(sel.value);
   modal.classList.add('show');
@@ -999,12 +1017,18 @@ document.getElementById('btn-add').addEventListener('click', () => {
 document.getElementById('m-type').addEventListener('change', e => renderCfg(e.target.value));
 document.getElementById('m-cancel').addEventListener('click', () => modal.classList.remove('show'));
 
+// Label overrides for nicer display names (esp. ws2812 fields)
+const CFG_LABELS = {
+  ws2812: { din: 'DIN', count: 'Count', brightness: 'Brightness' }
+};
+
 function renderCfg(type) {
   const t = TYPES.find(x => x.name === type);
   const box = document.getElementById('m-cfg');
   if (!t) { box.innerHTML = ''; return; }
+  const labels = (CFG_LABELS[type]) || {};
   box.innerHTML = Object.keys(t.default_config || {}).map(k => `
-    <div class="fg"><label>${esc(k)}</label>
+    <div class="fg"><label>${esc(labels[k] || k)}</label>
       <input id="cfg-${esc(k)}" value="${esc(t.default_config[k])}"></div>`).join('');
 }
 

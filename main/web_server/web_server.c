@@ -34,10 +34,25 @@
 #include "net_services/time_sync.h"
 #include "net_services/mdns_service.h"
 #include "sys_stats.h"
+#include "sys_info.h"
 
 static const char *TAG = "web_server";
 
 static httpd_handle_t g_server = NULL;
+
+/**
+ * @brief Upsert a string key into a JSON object.
+ *
+ * cJSON_ReplaceItemInObject() silently ignores keys that do not already
+ * exist, which loses new settings (e.g. a first-time wifi_ssid). Delete
+ * first so both insert and update work.
+ */
+static void json_set_string(cJSON *obj, const char *key, const char *value)
+{
+    if (obj == NULL || key == NULL || value == NULL) return;
+    cJSON_DeleteItemFromObject(obj, key);
+    cJSON_AddStringToObject(obj, key, value);
+}
 
 // Embedded web UI (see main/web_server/web_files/index.html)
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -110,7 +125,7 @@ static esp_err_t api_node_handler(httpd_req_t *req)
         for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
             cJSON *v = cJSON_GetObjectItem(incoming, keys[i]);
             if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-                cJSON_ReplaceItemInObject(node, keys[i], cJSON_CreateString(v->valuestring));
+                json_set_string(node, keys[i], v->valuestring);
             }
         }
         /* device_id is intentionally ignored here — it is set at the factory
@@ -400,6 +415,7 @@ static esp_err_t api_device_types_handler(httpd_req_t *req)
         cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "name", t->name);
         cJSON_AddStringToObject(item, "description", t->description);
+        cJSON_AddStringToObject(item, "description_zh", t->description_zh);
         cJSON_AddNumberToObject(item, "capabilities", t->capabilities);
 
         cJSON *cfg = cJSON_CreateObject();
@@ -480,88 +496,10 @@ static esp_err_t api_config_get_handler(httpd_req_t *req)
  */
 static esp_err_t api_system_info_handler(httpd_req_t *req)
 {
-    cJSON *json = cJSON_CreateObject();
-    cJSON_AddNumberToObject(json, "uptime", (double)(esp_timer_get_time() / 1000000ULL));
-    cJSON_AddNumberToObject(json, "free_heap", (double)esp_get_free_heap_size());
-    cJSON_AddNumberToObject(json, "min_free_heap", (double)esp_get_minimum_free_heap_size());
-
-    /* esp_get_free_heap_size() includes PSRAM, which hides the pool that
-     * actually runs out: mbedTLS handshake buffers and Wi-Fi come from internal
-     * RAM. A TLS session that fails to be created is almost always this figure,
-     * not the headline one. */
-    cJSON_AddNumberToObject(json, "free_heap_internal",
-        (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    cJSON_AddNumberToObject(json, "min_free_heap_internal",
-        (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
-
-    /* Clock: null until NTP has set it, so a client can tell the difference
-     * between "midnight 1970" and "not synced yet". */
-    cJSON *epoch = cJSON_AddNumberToObject(json, "epoch", (double)time_sync_epoch());
-    if (epoch && time_sync_epoch() == 0) {
-        cJSON_DeleteItemFromObject(json, "epoch");
-        cJSON_AddNullToObject(json, "epoch");
+    cJSON *json = sys_info_build();
+    if (json == NULL) {
+        return send_error(req, "failed to build system info", 500);
     }
-    char iso[32];
-    if (time_sync_iso8601(iso, sizeof(iso)) == ESP_OK) {
-        cJSON_AddStringToObject(json, "time", iso);
-    } else {
-        cJSON_AddNullToObject(json, "time");
-    }
-    cJSON_AddBoolToObject(json, "time_synced", time_sync_is_synced());
-    cJSON_AddStringToObject(json, "ntp_server", time_sync_server());
-    cJSON_AddStringToObject(json, "timezone", time_sync_timezone());
-
-    if (mdns_service_is_running()) {
-        cJSON_AddStringToObject(json, "mdns", mdns_service_fqdn());
-    }
-    cJSON_AddNumberToObject(json, "ws_clients", ws_server_client_count());
-
-    /* CPU load and RAM. Internal RAM is reported separately from the total
-     * because it is the pool that actually runs out. */
-    sys_stats_t st;
-    sys_stats_get(&st);
-
-    cJSON *cpu = cJSON_AddObjectToObject(json, "cpu");
-    cJSON_AddNumberToObject(cpu, "freq_mhz", st.cpu_freq_mhz);
-    cJSON_AddNumberToObject(cpu, "cores", 2);
-    if (st.cpu_valid) {
-        cJSON_AddNumberToObject(cpu, "usage", (double)st.cpu_usage);
-    } else {
-        cJSON_AddNullToObject(cpu, "usage");
-    }
-    cJSON_AddNumberToObject(cpu, "tasks", st.task_count);
-
-    cJSON *ram = cJSON_AddObjectToObject(json, "ram");
-    cJSON_AddNumberToObject(ram, "internal_total", (double)st.int_total);
-    cJSON_AddNumberToObject(ram, "internal_free", (double)st.int_free);
-    cJSON_AddNumberToObject(ram, "internal_min_free", (double)st.int_min_free);
-    cJSON_AddNumberToObject(ram, "internal_largest", (double)st.int_largest);
-    cJSON_AddNumberToObject(ram, "internal_used_pct",
-                            (double)sys_stats_internal_used_pct(&st));
-    if (st.psram_present) {
-        cJSON_AddNumberToObject(ram, "psram_total", (double)st.psram_total);
-        cJSON_AddNumberToObject(ram, "psram_free", (double)st.psram_free);
-        cJSON_AddNumberToObject(ram, "psram_used_pct",
-                                (double)sys_stats_psram_used_pct(&st));
-    }
-
-    /* Wi-Fi state + IP */
-    wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        cJSON_AddStringToObject(json, "wifi_ssid", (const char *)ap.ssid);
-        cJSON_AddNumberToObject(json, "wifi_rssi", ap.rssi);
-    }
-
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif) {
-        esp_netif_ip_info_t ip;
-        if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), IPSTR, IP2STR(&ip.ip));
-            cJSON_AddStringToObject(json, "ip", buf);
-        }
-    }
-
     return send_json(req, json, 200);
 }
 
@@ -595,12 +533,23 @@ static esp_err_t api_network_handler(httpd_req_t *req)
             net = cJSON_AddObjectToObject(cfg, "network");
         }
 
-        cJSON *item;
-        cJSON_ArrayForEach(item, incoming) {
-            if (cJSON_IsString(item) || cJSON_IsNumber(item) || cJSON_IsBool(item)) {
-                cJSON_ReplaceItemInObject(net, item->string,
-                                          cJSON_Duplicate(item, true));
+        cJSON *item = incoming->child;
+        while (item != NULL) {
+            if (cJSON_IsString(item)) {
+                json_set_string(net, item->string, item->valuestring);
+            } else if (cJSON_IsNumber(item) || cJSON_IsBool(item)) {
+                cJSON *dup = cJSON_Duplicate(item, true);
+                cJSON_DeleteItemFromObject(net, item->string);
+                cJSON_AddItemToObject(net, item->string, dup);
             }
+            /* Never log secrets */
+            if (strstr(item->string, "password") != NULL) {
+                ESP_LOGI(TAG, "Network config: %s = <set>", item->string);
+            } else {
+                ESP_LOGI(TAG, "Network config: %s = %s", item->string,
+                         cJSON_IsString(item) ? item->valuestring : "<non-string>");
+            }
+            item = item->next;
         }
 
         esp_err_t err = node_config_set(cfg);
@@ -826,31 +775,47 @@ static esp_err_t api_wifi_config_handler(httpd_req_t *req)
         return send_error(req, "SSID required", 400);
     }
 
-    // Save to NVS for Wi-Fi provisioning
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open("espwifiprovisioning", NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        nvs_set_str(nvs, "ssid", ssid->valuestring);
-        if (cJSON_IsString(password) && strlen(password->valuestring) > 0) {
-            nvs_set_str(nvs, "password", password->valuestring);
-        } else {
-            nvs_erase_key(nvs, "password");
-        }
-        nvs_commit(nvs);
-        nvs_close(nvs);
-        ESP_LOGI(TAG, "Wi-Fi config saved: %s", ssid->valuestring);
+    /* node_config is the AUTHORITATIVE source for Wi-Fi credentials: on boot
+     * wifi_prov reads network.wifi_ssid / wifi_password from it and calls
+     * esp_wifi_set_config(). Writing any other NVS namespace would be ignored. */
+    cJSON *cfg = node_config_get();
+    if (cfg == NULL) cfg = cJSON_CreateObject();
+
+    cJSON *net = cJSON_GetObjectItem(cfg, "network");
+    if (!cJSON_IsObject(net)) {
+        net = cJSON_AddObjectToObject(cfg, "network");
     }
 
+    json_set_string(net, "wifi_ssid", ssid->valuestring);
+    if (cJSON_IsString(password)) {
+        json_set_string(net, "wifi_password", password->valuestring);
+    } else {
+        cJSON_DeleteItemFromObject(net, "wifi_password");
+    }
+
+    char saved_ssid[64];
+    snprintf(saved_ssid, sizeof(saved_ssid), "%s", ssid->valuestring);
+
+    esp_err_t err = node_config_set(cfg);
+    cJSON_Delete(cfg);
     cJSON_Delete(incoming);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Wi-Fi config saved: %s", saved_ssid);
+    } else {
+        ESP_LOGE(TAG, "Failed to save Wi-Fi config: %s", esp_err_to_name(err));
+    }
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "ok", err == ESP_OK);
-    send_json(req, resp, err == ESP_OK ? 200 : 500);
+    esp_err_t resp_err = send_json(req, resp, err == ESP_OK ? 200 : 500);
 
-    // Reboot to apply
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK;
+    if (err == ESP_OK) {
+        // Wait long enough for the HTTP response to flush, then reboot
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+    return resp_err;
 }
 
 esp_err_t web_server_start(void)

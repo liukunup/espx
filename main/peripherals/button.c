@@ -144,6 +144,8 @@ static esp_err_t button_default_config(cJSON *config)
 static const device_type_t button_driver = {
     .name = "button",
     .description = "GPIO input button",
+    .description_zh = "按钮",
+    .save_state = false,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_NOTIFY,
     .init = button_init,
     .deinit = button_deinit,

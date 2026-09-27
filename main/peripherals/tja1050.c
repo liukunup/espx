@@ -290,6 +290,8 @@ static esp_err_t tja1050_validate_config(const cJSON *config)
 static const device_type_t tja1050_driver = {
     .name = "can",
     .description = "TJA1050 CAN (TWAI) transceiver",
+    .description_zh = "TJA1050 CAN 收发器",
+    .save_state = false,
     .capabilities = DEVICE_CAPABILITY_READ | DEVICE_CAPABILITY_WRITE | DEVICE_CAPABILITY_NOTIFY,
     .init = tja1050_init,
     .deinit = tja1050_deinit,
