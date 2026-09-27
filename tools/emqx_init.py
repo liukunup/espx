@@ -212,17 +212,35 @@ class Emqx:
 # rule planning
 # --------------------------------------------------------------------------- #
 
-def plan_rules(username, prefix):
+def plan_rules(username, prefix, per_node=False):
     """ACL rules for one ESPX node.
 
     Topics used by the firmware (see docs/ARCHITECTURE.md):
       publish   <prefix>/state  <prefix>/sensors  <prefix>/attrs/...  <prefix>/ota/status  <prefix>/config/result
       subscribe <prefix>/cmd/...
+
+    per_node=True replaces the fixed prefix with EMQX's ${clientid} placeholder,
+    which is what makes several units share one broker safely: every node's
+    client id IS its device id, so a fleet all publishing under "espx/" can only
+    touch "espx/<its own id>/...". Required when the fleet shares one prefix.
+    """
+    scope = f"{prefix}/${{clientid}}" if per_node else prefix
+    return [
+        {"permission": "allow", "action": "publish",   "topic": f"{scope}/#"},
+        {"permission": "allow", "action": "subscribe", "topic": f"{scope}/cmd/#"},
+        {"permission": "allow", "action": "subscribe", "topic": f"{scope}/ota/#"},
+    ]
+
+
+def monitor_user_rules(prefix):
+    """ACL for a monitor/operator account.
+
+    With per-node device rules a device can only see its own topics, so an
+    operator that needs to watch and command the whole fleet needs its own user.
     """
     return [
-        {"permission": "allow", "action": "publish",   "topic": f"{prefix}/#"},
-        {"permission": "allow", "action": "subscribe", "topic": f"{prefix}/cmd/#"},
-        {"permission": "allow", "action": "subscribe", "topic": f"{prefix}/ota/#"},
+        {"permission": "allow", "action": "subscribe", "topic": f"{prefix}/#"},
+        {"permission": "allow", "action": "publish",   "topic": f"{prefix}/+/cmd/#"},
     ]
 
 
@@ -312,6 +330,13 @@ def main():
     ap.add_argument("--device-pass", default=None,
                     help="password for the device user (required unless --no-authn)")
     ap.add_argument("--topic-prefix", default=DEFAULT_TOPIC_PREFIX)
+    ap.add_argument("--per-node", action="store_true",
+                    help="scope ACL rules with ${clientid} so several nodes can "
+                         "share one prefix without touching each other's topics")
+    ap.add_argument("--monitor-user", default=None,
+                    help="also create a fleet-wide monitor/operator user with this name")
+    ap.add_argument("--monitor-pass", default=None, help="password for --monitor-user")
+    # (validated below, once argparse has finished)
     ap.add_argument("--no-authn", action="store_true",
                     help="do NOT create an authenticator; leave anonymous access as is")
     ap.add_argument("--dry-run", action="store_true", help="print the plan only")
@@ -327,6 +352,9 @@ def main():
 
     if not args.no_authn and not args.undo and not args.device_pass:
         ap.error("--device-pass is required unless --no-authn or --undo is given")
+
+    if args.monitor_user and not args.monitor_pass and not args.undo:
+        ap.error("--monitor-pass is required together with --monitor-user")
 
     emqx = Emqx(args.host, args.dashboard_port, args.admin_user, args.admin_pass,
                 verbose=args.verbose)
@@ -363,7 +391,8 @@ def main():
     existing_rules = rules_by_user.get(args.device_user, [])
     print(f"  authz rules      : {sum(len(v) for v in rules_by_user.values())} "
           f"({len(existing_rules)} for '{args.device_user}')")
-    wanted = plan_rules(args.device_user, args.topic_prefix)
+    wanted = plan_rules(args.device_user, args.topic_prefix,
+                        per_node=args.per_node)
 
     # ----------------------------------------------------------------- undo
     if args.undo:
@@ -435,6 +464,10 @@ def main():
         action = emqx.upsert_user(authn_id, args.device_user, args.device_pass)
         print(f"  user         : '{args.device_user}' {action}")
 
+        if args.monitor_user:
+            action = emqx.upsert_user(authn_id, args.monitor_user, args.monitor_pass)
+            print(f"  monitor user : '{args.monitor_user}' {action}")
+
     if emqx.ensure_authz_source():
         print("  authz source : built_in_database added")
     else:
@@ -446,6 +479,12 @@ def main():
               f"({len(existing_rules) + len(to_add)} total)")
     else:
         print("  ACL rules    : already present")
+
+    if args.monitor_user:
+        emqx.delete_rules_for_user(args.monitor_user)
+        mon_rules = monitor_user_rules(args.topic_prefix)
+        emqx.add_rules(args.monitor_user, mon_rules)
+        print(f"  monitor ACL  : {len(mon_rules)} rule(s) on '{args.topic_prefix}/#'")
 
     # the settings should already be deny-by-default; only report
     settings = emqx.authz_settings() or {}

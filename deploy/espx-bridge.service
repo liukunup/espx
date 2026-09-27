@@ -1,0 +1,48 @@
+# ESPX Kafka -> TDengine bridge (systemd)
+#
+# This belongs on a homelab host, NOT on a workstation: the pipeline stops
+# ingesting whenever the machine sleeps, closes its lid, or leaves the network.
+#
+# Install (on the target host):
+#   sudo useradd -r -s /usr/sbin/nologin espx || true
+#   sudo mkdir -p /opt/espx/bin /var/lib/espx
+#   sudo cp tools/kafka_to_tdengine.py /opt/espx/bin/
+#   sudo cp deploy/espx-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now espx-bridge
+#   systemctl status espx-bridge
+#   journalctl -u espx-bridge -f
+#
+# Requires: python3 with `kafka-python` (pip3 install kafka-python)
+
+[Unit]
+Description=ESPX bridge: Kafka (espx-telemetry) -> TDengine (espx)
+# See docs/PIPELINE.md in the repo for the full pipeline reference.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=espx
+Group=espx
+
+# Credentials live here rather than in the unit, so the unit can stay in git.
+EnvironmentFile=-/etc/espx-bridge.env
+
+ExecStart=/usr/bin/python3 -u /opt/espx/bin/kafka_to_tdengine.py \
+    --offsets /var/lib/espx/offsets.json
+
+Restart=always
+RestartSec=5
+
+# The bridge only needs outbound TCP; lock everything else down.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/espx
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
