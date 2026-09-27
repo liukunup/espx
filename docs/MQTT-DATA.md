@@ -18,10 +18,17 @@
 | `<prefix>/status` | 上行 | 1 | 是 | 30 s | 节点监控快照 |
 | `<prefix>/sensors` | 上行 | 1 | 否 | 10 s | 周期传感器读数 |
 | `<prefix>/attrs/<id>` | 上行 | 1 | 否 | 按需 | 查询响应 |
+| `<prefix>/attrs/all` | 上行 | 1 | 否 | 按需 | 查询所有设备响应 |
+| `<prefix>/attrs/error` | 上行 | 1 | 否 | 按需 | 控制失败错误 |
+| `<prefix>/attrs/devices` | 上行 | 1 | 否 | 按需 | 设备列表查询响应 |
+| `<prefix>/config/result` | 上行 | 1 | 否 | 按需 | 配置结果 |
+| `<prefix>/ota/status` | 上行 | 1 | 否 | 按需 | OTA 状态 |
 | `<prefix>/cmd/control/<id>` | 下行 | 1 | 否 | — | 控制命令 |
 | `<prefix>/cmd/query/<id>` | 下行 | 1 | 否 | — | 查询请求 |
+| `<prefix>/cmd/query/all` | 下行 | 1 | 否 | — | 查询所有设备 |
 | `<prefix>/cmd/config` | 下行 | 1 | 否 | — | 下发 YAML 配置 |
 | `<prefix>/cmd/reboot` | 下行 | 1 | 否 | — | 重启 |
+| `<prefix>/cmd/ota` | 下行 | 1 | 否 | — | OTA 控制 |
 
 所有上行消息都带 MQTT 5 **User Properties**（便于按固件/型号分组，无需解析 payload）：
 
@@ -173,6 +180,79 @@ ws2812 的四种写法：
 {"all":{"r":255,"g":0,"b":0},"brightness":64}                  // 全部同色（显式）
 {"index":3,"r":160,"g":32,"b":240}                             // 单颗
 {"pixels":[{"r":255,"g":0,"b":0},{"r":0,"g":255,"b":0}],"brightness":171}  // 逐颗
+```
+
+### 2.6 WS2812 完整控制指南
+
+#### 配置 WS2812 外设
+
+```yaml
+# 添加 WS2812 外设
+devices:
+  - id: led_strip
+    type: ws2812
+    config:
+      din: 48      # GPIO 引脚
+      count: 10    # 灯珠数量
+      brightness: 255  # 0-255，默认 255
+```
+
+#### MQTT 命令格式
+
+| 命令 | Topic | Payload |
+|------|--------|---------|
+| 全部同色 | `<prefix>/cmd/control/<id>` | `{"action":"set","value":{"r":255,"g":0,"b":0}}` |
+| 指定序号 | `<prefix>/cmd/control/<id>` | `{"action":"set","value":{"index":0,"r":0,"g":255,"b":0}}` |
+| 逐颗设置 | `<prefix>/cmd/control/<id>` | `{"action":"set","value":{"pixels":[...]}}` |
+| 带亮度 | `<prefix>/cmd/control/<id>` | `{"action":"set","value":{"r":255,"g":255,"b":255,"brightness":128}}` |
+| 查询状态 | `<prefix>/cmd/query/<id>` | `{"action":"get"}` |
+
+> **注意**：`index` 从 **0** 开始（第 1 颗灯珠 = index 0）
+
+#### 常用颜色参考
+
+| 颜色 | r | g | b |
+|------|---|---|---|
+| 红色 | 255 | 0 | 0 |
+| 绿色 | 0 | 255 | 0 |
+| 蓝色 | 0 | 0 | 255 |
+| 黄色 | 255 | 255 | 0 |
+| 紫色 | 255 | 0 | 255 |
+| 青色 | 0 | 255 | 255 |
+| 白色 | 255 | 255 | 255 |
+| 黑色(关) | 0 | 0 | 0 |
+
+### 2.7 订阅上报数据
+
+#### 命令行订阅
+
+```bash
+# 订阅全部上报（调试用）
+mosquitto_sub -h <broker> -t '<prefix>/#' -v
+
+# 订阅特定主题
+mosquitto_sub -h <broker> -t '<prefix>/state' -v              # 在线心跳
+mosquitto_sub -h <broker> -t '<prefix>/sensors' -v             # 传感器数据
+mosquitto_sub -h <broker> -t '<prefix>/status' -v             # 节点状态
+mosquitto_sub -h <broker> -t '<prefix>/attrs/#' -v            # 查询响应
+mosquitto_sub -h <broker> -t '<prefix>/config/result' -v      # 配置结果
+mosquitto_sub -h <broker> -t '<prefix>/ota/status' -v         # OTA 状态
+
+# 通配符订阅（多节点场景）
+mosquitto_sub -h <broker> -t 'espx/+/sensors' -v              # 所有节点传感器
+mosquitto_sub -h <broker> -t 'espx/+/#' -v                    # 所有节点所有消息
+```
+
+#### 查询命令触发上报
+
+```bash
+# 查询单个设备
+mosquitto_pub -h <broker> -t '<prefix>/cmd/query/<id>' -m '{"action":"get"}'
+# 响应发布到: <prefix>/attrs/<id>
+
+# 查询所有设备
+mosquitto_pub -h <broker> -t '<prefix>/cmd/query/all' -m '{"action":"get"}'
+# 响应发布到: <prefix>/attrs/all
 ```
 
 ---

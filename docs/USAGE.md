@@ -145,13 +145,25 @@ mosquitto_pub -h $BROKER -t "$PREFIX/cmd/query/relay_a" -m '{"action":"get"}'
 # 74HC595 两片 = 16 路，第 0 片输出 0x01
 mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/out16" -m '{"action":"set","value":[1,0]}'
 
-# WS2812 整条红色，第 3 颗蓝色
+# WS2812 控制（支持 4 种写法）
+# 1. 全部同色
+mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"r":255,"g":0,"b":0}}'
+# 2. 全部同色（显式 all）
 mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"all":{"r":255,"g":0,"b":0}}}'
-mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"index":3,"r":0,"g":0,"b":255}}'
+# 3. 指定序号（index 从 0 开始）
+mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"index":0,"r":0,"g":255,"b":0}}'
+# 4. 逐颗设置
+mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"pixels":[{"r":255,"g":0,"b":0},{"r":0,"g":255,"b":0},{"r":0,"g":0,"b":255}]}}'
 
-# 只看在线状态
-mosquitto_sub -h $BROKER -t "$PREFIX/state" -v
-```
+# WS2812 带亮度（brightness: 0-255）
+mosquitto_pub -h $BROKER -t "$PREFIX/cmd/control/strip" -m '{"action":"set","value":{"r":255,"g":255,"b":255,"brightness":128}}'
+
+# 订阅上报数据
+mosquitto_sub -h $BROKER -t "$PREFIX/#" -v                    # 全部
+mosquitto_sub -h $BROKER -t "$PREFIX/state" -v                # 在线状态
+mosquitto_sub -h $BROKER -t "$PREFIX/sensors" -v              # 传感器数据
+mosquitto_sub -h $BROKER -t "$PREFIX/attrs/#" -v             # 查询响应
+
 
 ---
 
