@@ -2069,7 +2069,7 @@ git commit -m "refactor: replace strncpy(size-1) idiom with str_copy"
  *
  * web_server.c owns the server lifecycle; each handler module owns its own
  * URI table and registers itself. Registration ORDER matters: the device
- * module registers the wildcard /api/peripherals/* routes and must therefore
+ * module registers the /api/peripherals wildcard routes and must therefore
  * be registered last, or it swallows the exact paths.
  */
 
@@ -2512,7 +2512,7 @@ static esp_err_t send_error(httpd_req_t *req, const char *msg, int status)
    b) 在原有的 for 注册循环**之后**追加：
 
    ```c
-    /* Migrated modules register themselves. The /api/peripherals/* wildcards
+    /* Migrated modules register themselves. The /api/peripherals wildcards
      * move to device_handler_register() in Task 13, which must run last. */
     node_handler_register(g_server);
     network_handler_register(g_server);
@@ -2582,7 +2582,7 @@ esp_err_t device_handler_register(httpd_handle_t server)
 {
     /* ORDER: exact paths must be registered before the wildcard patterns.
      * With httpd_uri_match_wildcard the first match wins, so a wildcard
-     * registered first would swallow /api/peripherals/reload. */
+     * registered first would swallow the /api/peripherals/reload route. */
     static const httpd_uri_t uris[] = {
         { .uri = "/api/peripherals",          .method = HTTP_GET,    .handler = api_devices_list_handler },
         { .uri = "/api/peripherals",          .method = HTTP_POST,   .handler = api_device_add_handler },
@@ -2610,7 +2610,7 @@ esp_err_t device_handler_register(httpd_handle_t server)
 a) 在 Task 12 Step 6 的注册块末尾追加：
 
 ```c
-    /* LAST: owns the /api/peripherals/* wildcards */
+    /* LAST: owns the /api/peripherals wildcard routes */
     device_handler_register(g_server);
 ```
 
@@ -2806,7 +2806,7 @@ esp_err_t wifi_handler_register(httpd_handle_t server)
     cert_handler_register(g_server);
     wifi_handler_register(g_server);
 
-    /* LAST: owns the /api/peripherals/* wildcards */
+    /* LAST: owns the /api/peripherals wildcard routes */
     device_handler_register(g_server);
 ```
 
