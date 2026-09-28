@@ -1415,6 +1415,7 @@ git commit -m "refactor(device): move device type, manager and event bus into de
 
 **Files:**
 - Move: `main/core/task_util.h` → `main/common/`
+- Move: `main/core/app_info.h` → `main/common/`  (header-only static-inline; preflight gap found during T8/T9 execution)
 - Move: `main/core/defaults.{c,h}` → `main/common/`
 - Move: `main/core/sys_stats.{c,h}` → `main/common/`
 - Move: `main/core/sys_info.{c,h}` → `main/common/`
@@ -1464,6 +1465,8 @@ git mv main/core/sys_info.h    main/common/sys_info.h
     "common/sys_info.c"
     "common/defaults.c"
 ```
+
+（`app_info.h` 是 header-only（`static inline`），**不需要** SRCS 条目，靠 `"common"` include 目录解析。）
 
 - [ ] **Step 4: 移除 `"core"` include 目录**
 

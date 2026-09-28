@@ -65,6 +65,7 @@ main/
 │   └── event_bus.c/h          # 事件总线
 │
 ├── common/                    # 新增：从 core/ 拆分
+│   ├── app_info.h              # 构建标识（header-only，static inline）
 │   ├── task_util.h             # 任务创建辅助（已是头文件）
 │   ├── defaults.c/h            # 默认配置
 │   ├── sys_stats.c/h           # 系统统计
