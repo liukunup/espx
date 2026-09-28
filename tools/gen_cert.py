@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tempfile
 import shutil
-import re
 
 CERT_DIR = "main/cert_manager/certs"
 OPENSSL_CNF = """
@@ -71,29 +70,12 @@ def get_mac_addresses():
 
 
 def get_device_id_from_serial():
-    """Read device ID from serial connection."""
-    try:
-        import serial
-        import time
-        
-        # Try common serial ports
-        ports = ['/dev/ttyUSB0', '/dev/ttyACM0', '/dev/tty.usbserial*']
-        
-        for port in ports:
-            try:
-                ser = serial.Serial(port, 115200, timeout=2)
-                time.sleep(0.5)
-                ser.write(b'AT+ID?\r\n')
-                response = ser.read(100).decode('utf-8', errors='ignore')
-                ser.close()
-                
-                match = re.search(r'espx-[0-9a-fA-F]{12}', response)
-                if match:
-                    return match.group(0)
-            except:
-                continue
-    except ImportError:
-        pass
+    """Read device ID from serial connection.
+
+    Not supported: the firmware no longer exposes a serial AT command
+    interface, so there is no AT+ID? query to issue. Device IDs are
+    derived from the MAC (see mac_to_device_id) or supplied explicitly.
+    """
     return None
 
 
