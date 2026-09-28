@@ -6,6 +6,9 @@ set(espx_sources
     # Application entry
     "app_main.c"
 
+    # Shared helpers
+    "utils/json_utils.c"
+
     # Core services
     "core/device_type.c"
     "core/event_bus.c"
@@ -61,6 +64,7 @@ set(espx_sources
 
 set(espx_include_dirs
     "."
+    "utils"
     "core"
     "peripherals"
     "mqtt_client"
