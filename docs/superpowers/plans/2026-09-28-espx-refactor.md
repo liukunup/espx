@@ -603,9 +603,7 @@ const char *json_get_string(const cJSON *obj, const char *key, const char *def)
         return def;
     }
 
-    /* cJSON's getter is not const-correct; the cast only drops constness for
-     * the lookup, the item is not modified. */
-    const cJSON *item = cJSON_GetObjectItem((cJSON *)obj, key);
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
     if (cJSON_IsString(item) && item->valuestring != NULL) {
         return item->valuestring;
     }
@@ -618,7 +616,7 @@ int json_get_int(const cJSON *obj, const char *key, int def)
         return def;
     }
 
-    const cJSON *item = cJSON_GetObjectItem((cJSON *)obj, key);
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
     if (cJSON_IsNumber(item)) {
         return item->valueint;
     }
@@ -631,7 +629,7 @@ bool json_get_bool(const cJSON *obj, const char *key, bool def)
         return def;
     }
 
-    const cJSON *item = cJSON_GetObjectItem((cJSON *)obj, key);
+    const cJSON *item = cJSON_GetObjectItem(obj, key);
     if (cJSON_IsBool(item)) {
         return cJSON_IsTrue(item);
     }
