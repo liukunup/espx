@@ -39,16 +39,28 @@ idf.py -p /dev/cu.usbserial-XXXX -b 460800 flash monitor
 main/
 ├── app_main.c                   启动顺序（有两条硬性顺序约束，见下）
 ├── Kconfig.projbuild            全部可配置项
-├── core/
+├── utils/
+│   ├── json_utils.{c,h}         cJSON 辅助函数
+│   ├── str_utils.{c,h}          字符串辅助函数
+│   └── nvs_utils.{c,h}          NVS 读写辅助
+├── config/
+│   ├── node_config.{c,h}        设备身份 + 网络配置
+│   ├── config_apply.{c,h}       配置语义（唯一入口）
+│   └── yaml.{c,h}               YAML 子集 → cJSON（不依赖 ESP-IDF）
+├── device/
 │   ├── device_type.{c,h}        驱动目录（类型注册）
 │   ├── device_manager.{c,h}     运行时设备实例 + NVS 持久化
-│   ├── node_config.{c,h}        设备身份 + 网络配置
-│   ├── event_bus.{c,h}          发布/订阅
-│   ├── yaml.{c,h}               YAML 子集 → cJSON（不依赖 ESP-IDF）
-│   └── config_apply.{c,h}       配置语义（唯一入口）
-├── peripherals/                 驱动实现（dht11/button/relay/shiftreg_595/ws2812）
+│   └── event_bus.{c,h}          发布/订阅
+├── common/
+│   ├── app_info.h               构建身份（唯一版本源）
+│   ├── defaults.{c,h}           工厂默认值（仅首次）
+│   ├── sys_stats.{c,h}          CPU 负载 + RAM 采样
+│   ├── sys_info.{c,h}           节点状态快照（HTTP + MQTT）
+│   └── task_util.h              PSRAM 任务栈辅助
+├── peripherals/                 驱动实现（dht11/button/relay/shiftreg_595/ws2812/tja1050/mcp4725/ads1115/ina226/buzzer）
 ├── mqtt_client/                 连接、命令处理、周期上报
 ├── web_server/                  HTTPS + REST + WebSocket + 静态页面
+│   └── handlers/                每个 API 区域一个模块（handlers.h + *_handler.c）
 ├── cert_manager/                证书（certs/ 下的 PEM 文件）
 ├── wifi_prov/                   BLE / SoftAP 配网 + 预置凭据直连
 ├── net_services/                NTP、mDNS 聚合
@@ -66,24 +78,34 @@ docs/                            文档
 ### 依赖只能向下
 
 ```
-        config_apply            配置语义（唯一真相入口）
+        config_apply            配置语义（唯一真相入口）        [config/]
        /     |      \
-   mqtt     https    console      通道层：只解析 + 转发 + 回执
+   mqtt     https    console     三条通道，只做解析与转发
        \     |      /
-        yaml (可选)              YAML → cJSON，不依赖 ESP-IDF
+        yaml (可选)              YAML → cJSON，不依赖 ESP-IDF    [config/yaml.c]
              |
-  device_manager · node_config · event_bus
+  device_manager · node_config · event_bus   [device/ · config/]
              |
-       device_type 目录
+       device_type 目录                              [device/]
              |
-        peripherals 驱动
+        peripherals 驱动                            [peripherals/]
              |
           ESP-IDF HAL
 ```
 
-* `yaml.c` 只依赖 cJSON 与 libc —— **必须可主机单元测试**，任何 ESP-IDF 依赖都不许进。
-* 通道层（MQTT/HTTPS/WS）**不含配置语义**，只做解析 → 调用 `config_apply()` → 回执。
+等价关系（`→` 指向被依赖者）：
+
+```
+config_apply → yaml | node_config | device_manager | event_bus
+device_manager → device_type | event_bus | node_config
+peripherals/* → device_type | device_manager
+utils/* → (libc, cJSON, NVS)    # 不反向依赖任何业务模块
+```
+
+* `config/yaml.c` 只依赖 cJSON 与 libc —— **必须可主机单元测试**，任何 ESP-IDF 依赖都不许进。
+* 通道层（MQTT/HTTPS/console）**不含配置语义**，只做解析 → 调用 `config_apply()` → 回执。
 * 驱动不反向依赖 `device_manager`（`device_manager` 通过函数指针调用驱动）。
+* `utils/` 不依赖任何业务模块，只依赖 libc、cJSON 与 NVS。
 
 ### 两条硬性启动顺序（都曾是真实 bug）
 
@@ -97,6 +119,21 @@ test_mode_start_longpress_watchdog(); // ② 必须在 wifi_prov_start() 之前
 
 其余服务**不得阻塞在 Wi-Fi 上**：MQTT 先启动并自行重试，需要 IP 的服务
 （NTP、mDNS）在 `wifi_status_task` 里拿到 IP 后再启动。
+
+### 新增一个 API 端点
+
+每个 API 区域对应 `main/web_server/handlers/<area>_handler.c` 一个模块：
+
+1. 在 `<area>_handler.c` 里实现 handler，回包用 `api_send_json()` /
+   `api_send_error()`（`handlers.h` / `handlers_common.c` 提供的共享助手）。
+2. 在同文件的 `<area>_handler_register(httpd_handle_t server)` 里用
+   `httpd_register_uri_handler()` 注册本模块的 URI 表。
+3. 在 `main/web_server/web_server.c` 的 `web_server_start()` 里调用该
+   `*_register()`，并在 `main/web_server/handlers/handlers.h` 里声明。
+
+**注册顺序：精确路径在前，通配在后。** `device_handler_register()` 拥有
+`/api/peripherals/*` 通配路由，必须**最后注册**，否则会吞掉
+`/api/peripherals` 与 `/api/peripherals/reload` 等精确路径。
 
 ---
 
@@ -307,24 +344,35 @@ curl -k https://$HOST/api/system/info | grep -E 'time|epoch'
 
 ### 主机单元测试（不需要设备）
 
-YAML 解析器被特意设计为不依赖 ESP-IDF，因此可直接在主机上跑：
+`main/utils/` 与 `main/config/yaml.c` 刻意不依赖 ESP-IDF，因此可直接在主机上跑。
+主机可测的套件只有三个：`tests/run_yaml_tests.sh`（yaml）、
+`tests/json_utils_test.c`、`tests/str_utils_test.c`；`nvs_utils` 没有主机测试
+（它依赖 ESP-IDF 的 NVS，仅在设备上验证）。
 
 ```bash
+# json_utils
+gcc -Wall -Wextra -Werror -Imain/utils -Imanaged_components/espressif__cjson/cJSON \
+    tests/json_utils_test.c main/utils/json_utils.c \
+    managed_components/espressif__cjson/cJSON/cJSON.c -o /tmp/jt -lm && /tmp/jt
+
+# str_utils
+gcc -Wall -Wextra -Werror -Imain/utils \
+    tests/str_utils_test.c main/utils/str_utils.c -o /tmp/st && /tmp/st
+
+# yaml
 tests/run_yaml_tests.sh
 ```
 
-输出：
+输出（三条命令末尾）：
 
 ```
-== yaml: core syntax ==
-ALL PASS (0 failure(s))
-== yaml: flow collections ==
-ALL PASS (0 failure(s))
+json_utils: all tests passed
+str_utils: all tests passed
 ALL YAML TESTS PASSED
 ```
 
 新增语法支持时，先在 `tests/yaml_test_*.c` 里加断言并看它失败，再改
-`main/core/yaml.c`。
+`main/config/yaml.c`。
 
 ### 串口日志抓取
 
@@ -368,7 +416,7 @@ curl -k https://$HOST/api/system/info | python3 -m json.tool
 | 措施 | 作用 |
 |---|---|
 | `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP` | Wi-Fi/LWIP 缓冲移入 PSRAM（官方推荐用于 octal PSRAM 的 S3） |
-| `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` + `core/task_util.h` | 不碰 flash 的应用任务栈移入 PSRAM |
+| `CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM` + `common/task_util.h` | 不碰 flash 的应用任务栈移入 PSRAM |
 | 精简 Wi-Fi 缓冲数量与 LwIP 窗口 | 载荷是小 JSON，默认值是按吞吐调的 |
 | `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | TLS 记录缓冲按需分配 |
 | `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` | TLS 会话上下文和握手缓冲走 PSRAM（内部 RAM 只有 250 KB，TLS 缓冲很容易把它耗尽导致 -0x008D/PSA_ERROR_INSUFFICIENT_MEMORY） |

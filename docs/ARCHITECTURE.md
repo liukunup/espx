@@ -129,6 +129,26 @@ namespace `espx_node`, key `config`.
 `device_id` defaults to the STA MAC and doubles as the MQTT client id and the
 default topic prefix.
 
+### 2.5 Module layering — dependency direction
+
+Dependencies point strictly downward; a lower module never includes a business
+module above it.
+
+```
+config_apply → yaml | node_config | device_manager | event_bus
+device_manager → device_type | event_bus | node_config
+peripherals/* → device_type | device_manager
+utils/* → (libc, cJSON, NVS)    # no reverse dependency on business modules
+```
+
+* `config/yaml.c` depends only on cJSON and libc — it must stay host-testable,
+  with no ESP-IDF dependency.
+* The channel layer (MQTT / HTTPS / console) holds no config
+  semantics: it parses, calls `config_apply()`, and reports the result.
+* Drivers never depend back on `device_manager`; the manager calls them through
+  function pointers and only needs the `device_t` definition.
+* `utils/` depends on nothing above it — only libc, cJSON and NVS.
+
 ---
 
 ## 3. Peripheral drivers
@@ -518,7 +538,7 @@ Three deliberate choices follow from this:
 
 Besides those, internal RAM is reclaimed by moving Wi-Fi/LWIP buffers to PSRAM
 (`CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP`), moving the stacks of **flash-free**
-tasks to PSRAM (`core/task_util.h`), trimming Wi-Fi buffer counts and LwIP
+tasks to PSRAM (`common/task_util.h`), trimming Wi-Fi buffer counts and LwIP
 windows, and enabling `MBEDTLS_DYNAMIC_BUFFER`. Two constraints are easy to get
 wrong and are documented in `docs/DEVELOPMENT.md` §5: a task with a PSRAM stack
 must never perform a flash operation, and
@@ -536,27 +556,55 @@ main/
 ├── app_main.c                 boot sequence
 ├── CMakeLists.txt             source list + EMBED_FILES
 ├── Kconfig.projbuild          ESPX configuration
-├── core/
-│   ├── app_info.h             build identity (single version source)
-│   ├── sys_stats.{c,h}        CPU load + RAM sampling
+├── utils/
+│   ├── json_utils.{c,h}       cJSON helpers
+│   ├── str_utils.{c,h}        string helpers
+│   └── nvs_utils.{c,h}        NVS read/write helpers
+├── config/
+│   ├── node_config.{c,h}      node identity + network config
+│   ├── config_apply.{c,h}     config semantics (single entry point)
+│   └── yaml.{c,h}             YAML subset → cJSON (no ESP-IDF)
+├── device/
 │   ├── device_type.{c,h}      driver registry
 │   ├── device_manager.{c,h}   runtime device instances + NVS persistence
-│   ├── event_bus.{c,h}        pub/sub
-│   └── node_config.{c,h}      node identity + network config
+│   └── event_bus.{c,h}        pub/sub
+├── common/
+│   ├── app_info.h             build identity (single version source)
+│   ├── defaults.{c,h}         seed factory defaults once
+│   ├── sys_stats.{c,h}        CPU load + RAM sampling
+│   ├── sys_info.{c,h}         node status snapshot (HTTP + MQTT)
+│   └── task_util.h            PSRAM task stack helpers
 ├── peripherals/
 │   ├── peripherals.c          registers every driver
 │   ├── dht11.{c,h}
 │   ├── button.{c,h}
 │   ├── relay.{c,h}
 │   ├── shiftreg_595.{c,h}
-│   └── ws2812.{c,h}
+│   ├── ws2812.{c,h}
+│   ├── tja1050.{c,h}
+│   ├── mcp4725.{c,h}
+│   ├── ads1115.{c,h}
+│   ├── ina226.{c,h}
+│   ├── buzzer.{c,h}
+│   └── esp_idf_i2c.{c,h}
 ├── mqtt_client/
 │   ├── espx_mqtt_client.{c,h} connect, topic prefix, subscribe
 │   ├── mqtt_commander.{c,h}   inbound commands
 │   └── mqtt_publisher.{c,h}   heartbeat + periodic sensors
 ├── web_server/
-│   ├── web_server.c           HTTPS + REST
+│   ├── web_server.c           HTTPS server lifecycle + REST dispatch
 │   ├── ws_server.{c,h}        WebSocket /ws (live push + commands)
+│   ├── handlers/              one module per API area
+│   │   ├── handlers.h         register API + shared response helpers
+│   │   ├── handlers_common.c  shared response helpers
+│   │   ├── node_handler.c     node endpoints
+│   │   ├── network_handler.c  network endpoints
+│   │   ├── config_handler.c   config endpoints
+│   │   ├── device_handler.c   device/peripheral endpoints (wildcard last)
+│   │   ├── system_handler.c   system endpoints
+│   │   ├── ota_handler.c      OTA endpoints
+│   │   ├── cert_handler.c     certificate endpoints
+│   │   └── wifi_handler.c     Wi-Fi endpoints
 │   └── web_files/index.html   single-page UI (embedded)
 ├── cert_manager/
 │   ├── cert_manager.{c,h}

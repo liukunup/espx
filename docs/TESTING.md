@@ -795,8 +795,13 @@ Everything that does not need a network, in one command:
 # offline: boot, test mode, device registry, hardware self-test
 python3 tools/espx_test.py --port $ESPX_PORT all
 
-# host unit tests for the YAML parser
+# host unit tests (no device needed)
 tests/run_yaml_tests.sh
+gcc -Wall -Wextra -Werror -Imain/utils -Imanaged_components/espressif__cjson/cJSON \
+    tests/json_utils_test.c main/utils/json_utils.c \
+    managed_components/espressif__cjson/cJSON/cJSON.c -o /tmp/jt -lm && /tmp/jt
+gcc -Wall -Wextra -Werror -Imain/utils \
+    tests/str_utils_test.c main/utils/str_utils.c -o /tmp/st && /tmp/st
 
 # network: HTTPS API, YAML configuration, MQTT, delta OTA
 #   requires the device to have an IP (T2.1b) and to reach this host
@@ -804,4 +809,5 @@ python3 tools/network_tests.py --device-ip <device-ip> --local-ip <host-ip> \
                                --patch dist/<base>-to-<new>.patch
 ```
 
-Expected tail for each: `RESULT: PASS` / `ALL YAML TESTS PASSED`.
+Expected tail for each: `RESULT: PASS` / `json_utils: all tests passed` /
+`str_utils: all tests passed` / `ALL YAML TESTS PASSED`.
