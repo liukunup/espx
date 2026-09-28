@@ -4,8 +4,11 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <esp_timer.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -80,6 +83,15 @@ void sys_info_add(cJSON *json)
     cJSON_AddNumberToObject(cpu, "tasks", st.task_count);
 
     cJSON *ram = cJSON_AddObjectToObject(json, "ram");
+    /* Internal RAM is the pool that runs out (Wi-Fi, TLS, PSA crypto);
+     * the headline free-heap figure includes PSRAM and hides it. Report it
+     * separately so exhaustion is visible before it fails an allocation. */
+    cJSON_AddNumberToObject(ram, "iram_free",
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(ram, "iram_min",
+                            heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(ram, "iram_total",
+                            heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(ram, "internal_total", (double)st.int_total);
     cJSON_AddNumberToObject(ram, "internal_free", (double)st.int_free);
     cJSON_AddNumberToObject(ram, "internal_min_free", (double)st.int_min_free);
@@ -91,6 +103,26 @@ void sys_info_add(cJSON *json)
         cJSON_AddNumberToObject(ram, "psram_free", (double)st.psram_free);
         cJSON_AddNumberToObject(ram, "psram_used_pct",
                                 (double)sys_stats_psram_used_pct(&st));
+    }
+
+    /* Per-task stack headroom. A task below ~1 KB free is about to overflow;
+     * this is how a too-small stack shows up before it crashes. */
+    cJSON *tasks = cJSON_AddArrayToObject(json, "tasks");
+    UBaseType_t n = uxTaskGetNumberOfTasks();
+    TaskStatus_t *status = malloc(n * sizeof(TaskStatus_t));
+    if (status != NULL) {
+        n = uxTaskGetSystemState(status, n, NULL);
+        for (UBaseType_t i = 0; i < n; i++) {
+            cJSON *t = cJSON_CreateObject();
+            cJSON_AddStringToObject(t, "name", status[i].pcTaskName);
+            /* High-water mark is in words on ESP-IDF's portmacro. */
+            cJSON_AddNumberToObject(t, "stack_free_bytes",
+                                    (double)status[i].usStackHighWaterMark *
+                                        sizeof(StackType_t));
+            cJSON_AddNumberToObject(t, "priority", status[i].uxCurrentPriority);
+            cJSON_AddItemToArray(tasks, t);
+        }
+        free(status);
     }
 
     /* Wi-Fi state + IP */
