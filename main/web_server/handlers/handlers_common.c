@@ -6,12 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <esp_log.h>
 #include <cJSON.h>
 
 #include "handlers.h"
-
-static const char *TAG = "http_api";
 
 static const char *status_text(int status)
 {
