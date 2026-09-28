@@ -14,13 +14,15 @@ set(espx_sources
     # Core services
     "core/device_type.c"
     "core/event_bus.c"
-    "core/node_config.c"
     "core/device_manager.c"
-    "core/yaml.c"
-    "core/config_apply.c"
     "core/sys_stats.c"
     "core/sys_info.c"
     "core/defaults.c"
+
+    # Configuration
+    "config/node_config.c"
+    "config/config_apply.c"
+    "config/yaml.c"
 
     # IP-dependent services
     "net_services/net_services.c"
@@ -67,6 +69,7 @@ set(espx_sources
 set(espx_include_dirs
     "."
     "utils"
+    "config"
     "core"
     "peripherals"
     "mqtt_client"
