@@ -22,8 +22,6 @@ over HTTPS and MQTT.
                  ├──────────────────────────────────────────────┤
    Web browser ──┤  WebSocket  /ws  (live state, no polling)    │
                  ├──────────────────────────────────────────────┤
-   host MCU ─────┤  Serial AT commands (UART1, ESP-AT style)    │
-                 ├──────────────────────────────────────────────┤
    LAN ──────────┤  mDNS  <prefix><mac>.local                   │
                  │  NTP   clock sync                            │
                  ├──────────────────────────────────────────────┤
@@ -220,23 +218,7 @@ skipped, so an idle node produces no traffic.
 Requires `CONFIG_HTTPD_WS_SUPPORT`. HTTP requests and WebSocket clients share
 the server's socket pool (`max_open_sockets`, default 7).
 
-### 4.4 Serial AT commands
-
-UART1 by default, on its own IO_MUX pins (TX=GPIO17, RX=GPIO18, 115200), so the
-AT port and the log/manufacturing console (UART0) stay independent. Routing UART1
-through the GPIO matrix to arbitrary pins is possible (`ESPX_AT_USE_DEFAULT_PINS=n`)
-but the IO_MUX pins are what a board is wired for; UART2 has no IO_MUX pins and
-requires explicit ones. Wire format and command set
-follow ESP-AT: CR+LF terminated, `\r\nOK\r\n` / `\r\nERROR\r\n`, queries as
-`\r\n+CMD:<value>\r\n`.
-
-It is a documented **subset** of ESP-AT. ESP-AT is a complete application that
-takes over the device; here AT is one more channel onto the same configuration
-model, so every mutating command delegates to
-`config_apply()` / `device_write()` / the MQTT client. Run `AT+HELP?` for the
-supported list.
-
-### 4.5 Serial test console
+### 4.4 Serial test console
 
 Reached by holding BOOT for 3 s, via `POST /api/system/testmode`, or MQTT
 `cmd/config {"action":"testmode"}`.
@@ -365,7 +347,7 @@ situations with no BLE-capable client.
 
 Once it has an address, the node is reachable over mDNS under its device id
 (lower-cased, `[a-z0-9-]` only — e.g. `espx-84c7bb772e74.local`), which is the
-same string as the MQTT topic prefix and `AT+ID`, advertising `_https._tcp` with TXT records
+same string as the MQTT topic prefix and the device id, advertising `_https._tcp` with TXT records
 `id`/`model`/`version`, so a client learns the identity before the first request.
 
 **Consequence for bring-up:** an unprovisioned BLE-only device is unreachable
@@ -450,7 +432,6 @@ app_main()
  ├─ test_mode_check_trigger()             // NVS request flag, or TEST_MODE_GPIO
  │     └─ test_mode_enter()  → never returns
  ├─ test_mode_start_longpress_watchdog()  // BOOT 3 s → set flag → reboot
- ├─ at_service_start()                    // UART1, network independent
  ├─ node_config_init() / node_config_load()
  ├─ event_bus_init()
  ├─ device_type_registry_init() + peripherals_register_all()
@@ -484,10 +465,6 @@ The HTTPS server starts **before** the station connects so the configuration UI 
 reachable through the provisioning SoftAP (`https://192.168.4.1/`, SoftAP
 transport only). It keeps running afterwards. See limitation #1 about the
 missing authentication.
-
-`at_service_start()` also runs before the network, so a host MCU can talk to an
-as-yet-unprovisioned node. NTP and mDNS are the only services that wait for an
-address, and they wait inside a background task rather than in the boot path.
 
 ---
 
@@ -588,8 +565,6 @@ main/
 │   ├── net_services.{c,h}     starts the IP-dependent services
 │   ├── time_sync.{c,h}        NTP
 │   └── mdns_service.{c,h}     mDNS / DNS-SD
-├── at_service/
-│   └── at_service.{c,h}       serial AT commands (ESP-AT style)
 ├── wifi_prov/                 SoftAP/BLE provisioning
 ├── ota_service/               delta OTA
 ├── mfg_provision/             factory data

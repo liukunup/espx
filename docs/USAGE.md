@@ -1,6 +1,6 @@
 # ESPX 使用手册
 
-四种配置通道、MQTT 主题、REST API、WebSocket 与 AT 指令的完整用法。
+三种配置通道、MQTT 主题、REST API、WebSocket 的完整用法。
 
 **前置**：`HOST` 用 mDNS 名（`espx-84c7bb772e74.local`）或设备 IP 均可；
 HTTPS 用自签名证书，`curl` 需加 `-k`。
@@ -238,88 +238,27 @@ curl -k https://$HOST/api/system/info | python3 -m json.tool
 
 ---
 
-## 4. 通道三：串口 AT 指令
+## 4. 通道三：产线串口控制台
 
-指令集与线格式参考 [ESP-AT](https://github.com/espressif/esp-at/blob/master/README_CN.md)：
+产线自检控制台（UART0）是唯一的串口配置通道。长按 BOOT 3 秒进入，也可经
+`POST /api/system/testmode` 或 MQTT `cmd/config {"action":"testmode"}` 触发。
 
-- 每条指令以 **CR+LF** 结尾
-- 成功 → `\r\nOK\r\n`；失败 → `\r\nERROR\r\n`
-- 查询 → `\r\n+CMD:<值>\r\n\r\nOK\r\n`
-
-默认 **UART1，使用其 IO_MUX 默认引脚 TX=GPIO17 / RX=GPIO18，115200**（日志与产线控制台在 UART0，互不干扰）。
-
-刻意不通过 GPIO 矩阵把 UART1 绕到别的引脚：板子就是按 IO_MUX 默认引脚布线的，绕线既不符合惯例，也容易和 UART2（无 IO_MUX 默认引脚）等需求冲突。需要改引脚时在 menuconfig 里关掉 `ESPX_AT_USE_DEFAULT_PINS`。
-
-| 指令 | 说明 |
-|---|---|
-| `AT` | 连通性测试 |
-| `AT+GMR` | AT 版本、SDK 版本、固件版本、编译时间 |
-| `AT+ID` | 设备 ID 与名称 |
-| `AT+RST` | 重启 |
-| `AT+RESTORE` | 清空设备配置并重启 |
-| `AT+CWMODE=<1\|2\|3>` / `?` | Wi-Fi 模式 设置 / 查询 |
-| `AT+CWJAP="ssid","pass"` / `?` | 连接 Wi-Fi（写入配置后重启）/ 查询当前连接 |
-| `AT+CWQAP` | 断开 |
-| `AT+CIFSR` | 查询 IP 与 MAC |
-| `AT+SYSTIME?` | NTP 时间（未同步时返回 `NOT_SYNCED`） |
-| `AT+HOSTNAME?` | mDNS 名 |
-| `AT+CFG?` | 导出当前配置 |
-| `AT+CFG=<yaml\|json>` | 下发配置文档 |
-| `AT+DEV?` | 设备列表 |
-| `AT+DEV="<id>"` | 读设备 |
-| `AT+DEV="<id>",<json>` | 写设备 |
-| `AT+DEVTYPE?` | 驱动目录与默认配置 |
-| `AT+MQTTCONN=` / `?` | 设置 broker（`"host"[,port[,user,pass]]`）/ 查询 |
-| `AT+MQTTPUB="<topic>","<data>"` | 发布（**绝对**主题） |
-| `AT+MQTTSUB="<topic>"[,qos]` | 订阅 |
-| `AT+MQTTUNSUB="<topic>"` | 取消订阅 |
-| `AT+OTASTART="<url>"` | 开始差分 OTA |
-| `AT+OTASTATUS?` | OTA 状态与进度 |
-| `AT+TESTMODE` | 重启进入产线自检 |
-| `AT+HELP?` | 指令表 |
-
-`AT+MQTTPUB` 的主题是**绝对**主题（不叠加 `mqtt_topic_prefix`），与 ESP-AT 行为一致。
-
-### 示例（用串口工具或 picocom）
+控制台命令：
 
 ```
-AT
-OK
-
-AT+GMR
-AT version:ESPX-AT-1.0.0
-SDK version:v6.1
-Firmware version:1.0.2
-Compile time:Sep 26 2026 18:04:14
-OK
-
-AT+CFG=network: {mqtt_broker: "mqtt://192.168.1.10:1883", mqtt_topic_prefix: plant/line1}
-+CFG:added,0
-+CFG:updated,0
-+CFG:removed,0
-+CFG:REBOOT_REQUIRED
-OK
-
-AT+DEV="relay_a",true
-OK
-
-AT+DEV="relay_a"
-+DEV:"relay_a",{"state":true}
-OK
-
-AT+CIFSR
-+CIFSR:STAIP,"192.168.1.57"
-+CIFSR:STAMAC,"84:c7:bb:77:2e:74"
-OK
+help · types · list · add <id> <type> [json] · del <id> · read <id>
+write <id> <json> · test [id|all] · report · reset
+mfg show|set <json>|apply|clear · cfg <json|yaml>|show · exit
 ```
 
-> 这是 ESP-AT 的**子集**，不是完整替代。ESP-AT 是接管整个设备的独立应用；
-> 这里的 AT 只是同一配置模型上的又一个通道，因此每个变更指令都走
-> `config_apply()` / `device_write()`，不含独立的配置逻辑。
+其中 `cfg <json|yaml>` 用于在产线直接下发配置（等价于 REST `POST /api/config`），
+`mfg set` / `mfg apply` 用于写入并应用工厂预置数据（`mfg_data` 分区）。
+
+完整用法与逐步验证见 [TESTING.md](TESTING.md)（P1 用例与产线流程）。
 
 ---
 
-## 5. 通道四：WebSocket（`/ws`）
+## 5. WebSocket（`/ws`）
 
 浏览器与 `wss://$HOST/ws` 建立连接后，服务端主动推送状态，避免轮询。
 
@@ -368,7 +307,7 @@ curl -k https://espx-84c7bb772e74.local/api/node
 ```
 
 mDNS 名**就是设备 ID**（转小写并只保留 `[a-z0-9-]`），因此与 MQTT 主题前缀、
-AT+ID 报告的名称完全一致 —— 只有一个身份需要记，不会出现
+设备 ID 完全一致 —— 只有一个身份需要记，不会出现
 `espx-espx-…` 这类重复前缀。广播 `_https._tcp`（端口 = `CONFIG_ESPX_HTTPS_PORT`）。
 TXT 记录含 `id` / `model` / `version`，客户端在首次请求前就能拿到身份信息。
 
@@ -421,7 +360,7 @@ true                                  // 或 {"state": true}
 错误信息带行号。注意本实现只支持文档化的子集；`|` / `>` 多行标量会明确报错。
 
 **浏览器打不开 `https://….local`？**
-Windows 需装 Bonjour，Android 支持不稳定。用 IP 或 `AT+CIFSR` 查地址即可。
+Windows 需装 Bonjour，Android 支持不稳定。用 IP 访问，或用 `curl -k https://<ip>/api/system/info` 查地址即可。
 
 **WebSocket 显示 `poll`？**
 说明 WS 未连上，界面自动退化为轮询（功能不受影响）。检查 `/api/system/info`

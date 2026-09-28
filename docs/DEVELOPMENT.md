@@ -14,7 +14,7 @@ cd ~/esp/esp-idf && ./install.sh esp32s3
 
 # 主机侧工具
 pip install pyserial 'detools>=0.49.0' paho-mqtt
-# 可选：EMQX 初始化与 AT 手工调试
+# 可选：EMQX 初始化
 brew install mosquitto            # 或用 tools/mini_mqtt_broker.py
 ```
 
@@ -52,7 +52,6 @@ main/
 ├── cert_manager/                证书（certs/ 下的 PEM 文件）
 ├── wifi_prov/                   BLE / SoftAP 配网 + 预置凭据直连
 ├── net_services/                NTP、mDNS 聚合
-├── at_service/                  串口 AT 指令
 ├── ota_service/                 差分 OTA
 ├── mfg_provision/               工厂预置
 ├── test_mode/                   产线自检控制台
@@ -69,7 +68,7 @@ docs/                            文档
 ```
         config_apply            配置语义（唯一真相入口）
        /     |      \
-   mqtt     https    console/AT   通道层：只解析 + 转发 + 回执
+   mqtt     https    console      通道层：只解析 + 转发 + 回执
        \     |      /
         yaml (可选)              YAML → cJSON，不依赖 ESP-IDF
              |
@@ -83,7 +82,7 @@ docs/                            文档
 ```
 
 * `yaml.c` 只依赖 cJSON 与 libc —— **必须可主机单元测试**，任何 ESP-IDF 依赖都不许进。
-* 通道层（MQTT/HTTPS/AT/WS）**不含配置语义**，只做解析 → 调用 `config_apply()` → 回执。
+* 通道层（MQTT/HTTPS/WS）**不含配置语义**，只做解析 → 调用 `config_apply()` → 回执。
 * 驱动不反向依赖 `device_manager`（`device_manager` 通过函数指针调用驱动）。
 
 ### 两条硬性启动顺序（都曾是真实 bug）
@@ -251,7 +250,7 @@ devices:
 '
 ```
 
-MQTT、AT、WebSocket、自检**全自动可用** —— 因为它们都基于
+MQTT、WebSocket、自检**全自动可用** —— 因为它们都基于
 `device_type` 的能力位与 `device_manager`，不需要为每种外设写专门代码。
 
 ### 驱动编写要点
@@ -333,17 +332,6 @@ ALL YAML TESTS PASSED
 ./tools/verify_device.sh listen 20      # 复位并抓 20 秒日志到 dist/
 ```
 
-### AT 指令手工调试
-
-AT 在 UART1（GPIO17/18，IO_MUX 默认）。用第二个 USB-TTL 接上，或临时改到 UART0：
-
-```
-CONFIG_ESPX_AT_UART_NUM=0
-```
-
-> UART0 与日志/产线控制台共用，输出会交错，仅用于临时排查。此时固件会保留控制台的
-> 引脚不动（不会把日志输出改到 AT 的引脚上），并打印一条警告。
-
 ### 堆与性能
 
 ```bash
@@ -399,7 +387,6 @@ cache is disabled**." flash 擦写会关闭 cache，而 PSRAM 走同一个 cache
 | 任务 | 原因 |
 |---|---|
 | `ota_task` | `esp_ota_write()` 写 flash |
-| `at_service` | `AT+CFG` → `config_apply` → 写 NVS |
 | `ws_push` | WebSocket 下发配置 → 写 NVS |
 | `tm_longpress` | 写测试模式请求标志到 NVS |
 | `wifi_status` | 启动 mDNS，mDNS 会把主机名持久化到 NVS |

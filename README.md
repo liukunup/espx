@@ -19,7 +19,7 @@ configurable and persisted in NVS.
   │   ws2812             │        │    - id: relay_a         │
   │                      │        │      type: relay         │
   │  MQTT / HTTPS / OTA  │        │      config: {gpio: 5}   │
-  │  AT / WS / mDNS/NTP  │        │  network: {…}            │
+  │  WS / mDNS/NTP       │        │  network: {…}            │
   └──────────────────────┘        └──────────────────────────┘
               └──────────────►  one concrete node
 ```
@@ -33,17 +33,16 @@ The binding statement of intent lives in [AGENT.md](AGENT.md).
 | Capability | Notes |
 |---|---|
 | **Software-defined peripherals** | Bindings are configuration; changing the hardware means changing a document, not compiling a different firmware |
-| **Four configuration channels** | MQTT (YAML), HTTPS `POST /api/config`, serial AT commands, factory data — all through one `config_apply()` path |
+| **Three configuration channels** | MQTT (YAML), HTTPS `POST /api/config`, factory data — all through one `config_apply()` path |
 | **MQTT** | Periodic state/sensor publishing; commands for query, control, config, reboot, OTA, test mode |
 | **HTTPS management UI** | Self-signed certificate kept as project files and embedded at build time; single-page UI, REST API, **WebSocket live push** |
 | **Delta OTA** | `esp_delta_ota` + heatshrink; typically 95 %+ smaller than a full image, with base-image verification |
 | **BLE provisioning** | BLE by default (no open AP exposed); SoftAP available; pre-provisioned credentials supported |
 | **mDNS** | Reachable as `espx-<mac>.local`, no IP hunting |
 | **NTP** | Clock sync — needed for certificate validity and correlatable logs |
-| **Serial AT commands** | ESP-AT style command set so a host MCU can drive the node |
 | **Manufacturing test mode** | Hold BOOT for 3 s; interactive hardware self-test |
 | **Factory provisioning** | One-shot `mfg_data` partition: identity, network, MQTT, peripheral bindings |
-| **Default binding** | A fresh node binds its on-board WS2812 (GPIO48) as device `led`, controllable from the UI/MQTT/AT; seeded exactly once, so deleting it sticks |
+| **Default binding** | A fresh node binds its on-board WS2812 (GPIO48) as device `led`, controllable from the UI/MQTT; seeded exactly once, so deleting it sticks |
 | **System monitoring** | Dashboard shows CPU load, internal RAM / PSRAM usage (pressure-coloured bars) and task count |
 
 ---
@@ -163,13 +162,11 @@ remove_devices: [old_sensor]
 replace_devices: false          # true also removes devices not listed above
 ```
 
-The same document also works over HTTPS and AT:
+The same document also works over HTTPS:
 
 ```bash
 curl -k -X POST https://espx-84c7bb772e74.local/api/config \
      -H 'Content-Type: text/yaml' --data-binary @node.yaml
-
-AT+CFG=network: {mqtt_broker: "mqtt://192.168.1.10:1883"}
 ```
 
 ---
@@ -191,22 +188,21 @@ mosquitto_pub -h <broker> -t "$PREFIX/cmd/control/relay_a" -m '{"action":"set","
 mosquitto_pub -h <broker> -t "$PREFIX/cmd/query/temp_in"   -m '{"action":"get"}'
 ```
 
-Serial AT (UART1, TX=GPIO17, RX=GPIO18, 115200):
+REST API quick reference:
 
 ```
-AT+GMR                  version information
-AT+ID                   device id and name
-AT+CWJAP="ssid","pass"  join Wi-Fi and reboot
-AT+CIFSR                query IP
-AT+CFG?                 export the configuration
-AT+CFG=<yaml|json>      apply a configuration document
-AT+DEV?                 list devices
-AT+DEV="relay_a",true   actuate a device
-AT+SYSTIME?             NTP time
-AT+MQTTCONN="host",1883,"user","pass"
-AT+OTASTART="http://…/fw.patch"
-AT+TESTMODE             reboot into the manufacturing self-test
-AT+HELP?                full command list
+GET    /api/node                       version + device id / name
+GET    /api/config                     export the configuration
+POST   /api/config                     apply a configuration document (YAML or JSON)
+GET    /api/peripherals                list devices
+POST   /api/peripherals/{id}/write     write a device value
+POST   /api/system/reboot              reboot
+POST   /api/system/testmode            enter the manufacturing self-test
+GET    /api/system/info                IP, NTP time, heap, Wi-Fi, mDNS
+PUT    /api/network                    MQTT broker, credentials, topic prefix
+PUT    /api/wifi/config                save Wi-Fi credentials and reboot
+POST   /api/ota/start                  start delta OTA
+GET    /api/ota/status                 OTA status
 ```
 
 ---
@@ -289,7 +285,6 @@ exit            # reboot and apply
 4. With the SoftAP transport the config UI is reachable over the open
    provisioning AP.
 5. Wi-Fi credentials are stored in plaintext NVS.
-6. The AT command set is a **subset** of ESP-AT, not a drop-in replacement.
 
 The full list with mitigations is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §10.

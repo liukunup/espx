@@ -13,14 +13,12 @@
                         │   16MB Flash / 8MB PSRAM   │
    MQTT broker ─────────┤                            │
    (EMQX)               │  设备驱动（配置决定）       │
-                        │  NTP · mDNS · AT(UART1)    │
+                        │  NTP · mDNS                │
    OTA 服务器 ── http ──┤  差分 OTA                  │
    (patch 文件)          └──────────────────────────┘
-                                    │
-   宿主 MCU ───── UART1 AT ─────────┘
 ```
 
-节点只需能访问 MQTT broker 与 OTA 服务器；管理界面与 AT 都是本地能力。
+节点只需能访问 MQTT broker 与 OTA 服务器；管理界面是本地能力。
 
 ---
 
@@ -244,8 +242,7 @@ CONFIG_ESPX_PROV_TRANSPORT_SOFTAP=y
 | 6 | MQTT | 明文 1883（建议起步用） | 上 TLS（8883）；设备侧用公有 CA 可直接校验 |
 | 7 | OTA 来源 | 明文 HTTP + 基线 SHA-256 校验 | 上 HTTPS，并对补丁做签名校验 |
 | 8 | 安全启动 / Flash 加密 | 未启用 | 需要防物理提取时启用 |
-| 9 | 串口 AT | 无鉴权，UART1 | 若宿主 MCU 可信则无所谓；否则加 `AT+PWD` 之类的口令，或物理隔离 |
-| 10 | 调试日志 | INFO | 生产降到 WARN，且确保不打印密码（当前已对 password/key 打 `<set>`） |
+| 9 | 调试日志 | INFO | 生产降到 WARN，且确保不打印密码（当前已对 password/key 打 `<set>`） |
 
 生成新证书：
 
@@ -277,18 +274,16 @@ curl -k -X POST https://$HOST/api/ota/start \
      -d '{"url":"http://192.168.1.20:8000/current_to_next.patch"}'
 ```
 
-或 MQTT / AT：
+或 MQTT：
 
 ```bash
 mosquitto_pub -h $BROKER -t "$PREFIX/cmd/ota" -m '{"action":"start","url":"http://…/p.patch"}'
-# AT+OTASTART="http://…/p.patch"
 ```
 
 跟随进度：
 
 ```bash
 curl -k https://$HOST/api/ota/status | python3 -m json.tool
-# AT+OTASTATUS?
 ```
 
 ### 7.2 安全属性
@@ -320,8 +315,8 @@ curl -k https://$HOST/api/ota/status | python3 -m json.tool
 ping espx-84c7bb772e74.local
 curl -k https://espx-84c7bb772e74.local/api/system/info
 
-# 或串口 AT
-AT+CIFSR
+# 或按 IP 查询
+curl -k https://<ip>/api/system/info
 ```
 
 ### 8.2 健康检查
@@ -403,7 +398,7 @@ mosquitto_pub -V 5 -h $BROKER \
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
 | MQTT 连上但无数据 | EMQX 授权默认拒绝（见 3.1 第 3 条） | 跑 `tools/emqx_init.py --apply`；用它的真实性往返验证确认 |
-| `MQTT connected` 一直不出现 | broker 不可达 / 用户密码错 | 串口看 `Network: broker=… user=…`；AT+MQTTCONN? 查询 |
+| `MQTT connected` 一直不出现 | broker 不可达 / 用户密码错 | 串口看 `Network: broker=… user=…`；`curl -k https://<ip>/api/network` 查询 |
 | HTTPS 每次连接被重置 | 证书长度未含结尾 NUL | 已修复；若自行改动 `cert_manager` 请保持 `cert_len` 含 NUL |
 | 浏览器提示证书错误 | 自签名证书 | 正常，点信任；或换成自有 PKI |
 | 设备进了下载模式而非测试模式 | 用了 strapping 引脚做触发（GPIO0 上电拉低 = ROM 下载模式） | `CONFIG_MFG_TEST_GPIO=-1`（默认），改用长按 BOOT |

@@ -606,43 +606,6 @@ the 1 s tick).
 **Fail if:** the handshake fails (check `CONFIG_HTTPD_WS_SUPPORT=y`), or the UI
 shows `poll` instead of `live`.
 
-### T2.8 Serial AT interface
-
-**Proves:** a host MCU can commission and drive the node over UART.
-
-AT runs on **UART1**, on its own IO_MUX pins: **TX=GPIO17, RX=GPIO18, 115200**.
-Wire a USB-TTL adapter cross-over (ESP32 TX -> adapter RX, ESP32 RX -> adapter TX,
-GND common), then:
-
-```bash
-python3 tools/at_test.py --port /dev/cu.usbserial-XXXX      # 22 assertions
-python3 tools/at_test.py --port /dev/cu.usbserial-XXXX --manual
-```
-
-Alternatively set `CONFIG_ESPX_AT_UART_NUM=0` to test over the console UART; the
-firmware then leaves the console's pins alone and warns that log output will
-interleave with the AT replies.
-
-```
-AT
-AT+GMR
-AT+ID
-AT+CFG?
-AT+CFG=devices: [{id: at_relay, type: relay, config: {gpio: 5}}]
-AT+DEV?
-AT+DEV="at_relay",true
-AT+DEV="at_relay"
-AT+SYSTIME?
-AT+HOSTNAME?
-AT+HELP?
-```
-
-**Expect** `\r\nOK\r\n` after each, `+DEV:"at_relay",{"state":true}` for the
-read, and `+ERROR:unsupported command "…"` for anything not in the table.
-
-**Fail if:** no response (UART pins/UART number), or a truncated command gets
-executed (the service discards overlong lines instead of running them).
-
 ---
 
 ## P3 — delta OTA
@@ -831,9 +794,6 @@ Everything that does not need a network, in one command:
 ```bash
 # offline: boot, test mode, device registry, hardware self-test
 python3 tools/espx_test.py --port $ESPX_PORT all
-
-# serial AT smoke test (UART1 via a second adapter, or AT on UART0)
-#   see T2.8
 
 # host unit tests for the YAML parser
 tests/run_yaml_tests.sh

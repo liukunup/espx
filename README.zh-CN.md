@@ -16,7 +16,7 @@
   │   ws2812             │        │      config: {gpio: 4}   │
   │                      │        │    - id: relay_a         │
   │  MQTT / HTTPS / OTA  │        │      type: relay         │
-  │  AT / WS / mDNS/NTP  │        │      config: {gpio: 5}   │
+  │  WS / mDNS/NTP       │        │      config: {gpio: 5}   │
   └──────────────────────┘        └──────────────────────────┘
               └──────────────►  一个具体的节点
 ```
@@ -30,17 +30,16 @@
 | 能力 | 说明 |
 |---|---|
 | **软件定义外设** | 外设按配置绑定，`id` 唯一，改配置即改节点；无需为不同外形编译不同固件 |
-| **四种配置通道** | MQTT 下发 YAML、HTTPS `POST /api/config`、串口 AT 指令、工厂预置数据，全部走同一个 `config_apply()` |
+| **三种配置通道** | MQTT 下发 YAML、HTTPS `POST /api/config`、工厂预置数据，全部走同一个 `config_apply()` |
 | **MQTT** | 状态/传感器周期上报，命令下发（查询/控制/配置/重启/OTA/测试模式） |
 | **HTTPS 管理界面** | 自签名证书（项目文件，构建时嵌入）、单页 Web UI、REST API、**WebSocket 实时推送** |
 | **差分 OTA** | `esp_delta_ota` + heatshrink，补丁通常比整包小 95% 以上；带基线校验，错版本补丁无法刷入 |
 | **BLE 配网** | 默认 BLE（不暴露开放 AP）；也支持 SoftAP；支持工厂预置凭据直连 |
 | **mDNS** | 通过 `espx-<mac>.local` 直接访问，无需查 IP |
 | **NTP** | 时钟同步（证书有效期校验、日志时间戳） |
-| **串口 AT 指令** | 参考 ESP-AT 的指令集与应答格式，宿主 MCU 可直接驱动 |
 | **产线测试模式** | 长按 BOOT 3 秒进入，交互式硬件自检 |
 | **工厂预置** | `mfg_data` 分区一次性写入：设备身份、网络、MQTT、外设绑定 |
-| **默认绑定** | 新设备开箱即把板载 WS2812（GPIO48）绑为设备 `led`，可网页/MQTT/AT 直接控制；只播种一次，删掉不会复活 |
+| **默认绑定** | 新设备开箱即把板载 WS2812（GPIO48）绑为设备 `led`，可网页/MQTT 直接控制；只播种一次，删掉不会复活 |
 | **系统监控** | Dashboard 展示 CPU 负载、内部 RAM / PSRAM 占用（带压力变色条）与任务数 |
 
 ---
@@ -139,9 +138,6 @@ replace_devices: false           # 设为 true 则删除未列出的设备
 # HTTPS
 curl -k -X POST https://espx-84c7bb772e74.local/api/config \
      -H 'Content-Type: text/yaml' --data-binary @node.yaml
-
-# 串口 AT
-AT+CFG=network: {mqtt_broker: "mqtt://192.168.1.10:1883"}
 ```
 
 ---
@@ -172,22 +168,21 @@ mosquitto_pub -h <broker> -t "$PREFIX/cmd/control/relay_a" -m '{"action":"set","
 mosquitto_pub -h <broker> -t "$PREFIX/cmd/query/temp_in"   -m '{"action":"get"}'
 ```
 
-串口 AT（默认 UART1，使用其 IO_MUX 默认引脚 TX=GPIO17 / RX=GPIO18，115200）：
+REST API 速查：
 
 ```
-AT+GMR                  版本信息
-AT+ID                   设备 ID 与名称
-AT+CWJAP="ssid","pass"  连接 Wi-Fi 并重启
-AT+CIFSR                查询 IP
-AT+CFG?                 导出当前配置
-AT+CFG=<yaml|json>      下发配置
-AT+DEV?                 设备列表
-AT+DEV="relay_a",true   控制设备
-AT+SYSTIME?             NTP 时间
-AT+MQTTCONN="host",1883,"user","pass"
-AT+OTASTART="http://…/fw.patch"
-AT+TESTMODE             重启进入产线自检
-AT+HELP?                完整指令表
+GET    /api/node                       版本 + 设备 ID / 名称
+GET    /api/config                     导出当前配置
+POST   /api/config                     下发配置文档（YAML 或 JSON）
+GET    /api/peripherals                设备列表
+POST   /api/peripherals/{id}/write     写设备值
+POST   /api/system/reboot              重启
+POST   /api/system/testmode            重启进入产线自检
+GET    /api/system/info                IP、NTP 时间、堆、Wi-Fi、mDNS
+PUT    /api/network                    MQTT broker、凭据、主题前缀
+PUT    /api/wifi/config                保存 Wi-Fi 并重启
+POST   /api/ota/start                  开始差分 OTA
+GET    /api/ota/status                 OTA 状态
 ```
 
 ---
@@ -235,7 +230,7 @@ exit            # 重启并应用
 |---|---|
 | [AGENT.md](AGENT.md) | 工程方向与硬性设计约束（**权威**） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、数据模型、接口、OTA、分区表、已知限制 |
-| [docs/USAGE.md](docs/USAGE.md) | 四种配置通道的完整用法与示例 |
+| [docs/USAGE.md](docs/USAGE.md) | 三种配置通道的完整用法与示例 |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 环境搭建、新增外设驱动、代码规范、调试 |
 | [docs/TESTING.md](docs/TESTING.md) | 按优先级排序的测试用例与逐步验证方法 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 产线烧录、EMQX 初始化、安全加固、升级策略 |
@@ -265,7 +260,6 @@ exit            # 重启并应用
 3. BLE 配网 PoP 默认 `abcd1234`，且默认打印在二维码里；量产需按批次更换并关闭二维码内嵌。
 4. 若选择 SoftAP 配网，配置界面会暴露在开放的配网 AP 上。
 5. Wi-Fi 凭据以明文存于 NVS。
-6. AT 指令集是 ESP-AT 的**子集**，不是完整替代。
 
 完整列表与缓解措施见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 第 10 节。
 
