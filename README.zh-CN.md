@@ -148,10 +148,10 @@ curl -k -X POST https://espx-84c7bb772e74.local/api/config \
 HOST=espx-84c7bb772e74.local
 
 # 设备列表（含实时值）
-curl -k https://$HOST/api/devices
+curl -k https://$HOST/api/peripherals
 
 # 控制继电器
-curl -k -X POST https://$HOST/api/devices/relay_a/write -d 'true'
+curl -k -X POST https://$HOST/api/peripherals/relay_a/write -d 'true'
 
 # 导出当前配置
 curl -k https://$HOST/api/config

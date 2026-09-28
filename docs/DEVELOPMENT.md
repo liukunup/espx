@@ -544,7 +544,7 @@ ESP32 关闭 modem sleep 之前，空闲后首个请求常有数百毫秒延迟�
 | `esp_ota_set_boot_partition` 失败 | 分区表缺 `otadata` |
 | TLS 握手每次都重置 | 检查 `cert_len` 是否**包含**结尾 NUL（mbedTLS 的 PEM 要求） |
 | `EMBED_FILES` 符号名不对 | 名字为 `_binary_<路径中/替换为_>_start`，如 `_binary_server_crt_start` |
-| `error: '/*' within comment` | 注释里出现 `/api/devices/*` 这种序列；`/*` 会提前结束注释，改写措辞 |
+| `error: '/*' within comment` | 注释里出现 `/api/peripherals/*` 这种序列；`/*` 会提前结束注释，改写措辞 |
 | 通配符 URI 一直 404 | **默认 `uri_match_fn == NULL` 时只做精确字符串比较**，通配符必须显式 `config.httpd.uri_match_fn = httpd_uri_match_wildcard` |
 | `httpd_ws_frame_t` unknown | 未启用 `CONFIG_HTTPD_WS_SUPPORT` |
 | 布尔 Kconfig 在 C 里报未声明 | 未置位的布尔 Kconfig 不是 C 宏，C 代码要用 `#ifdef` 而不是 `if (CONFIG_…)` |

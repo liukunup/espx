@@ -176,8 +176,8 @@ curl -k -X POST https://espx-84c7bb772e74.local/api/config \
 ```bash
 HOST=espx-84c7bb772e74.local
 
-curl -k https://$HOST/api/devices                                    # list + live values
-curl -k -X POST https://$HOST/api/devices/relay_a/write -d 'true'   # actuate
+curl -k https://$HOST/api/peripherals                                    # list + live values
+curl -k -X POST https://$HOST/api/peripherals/relay_a/write -d 'true'   # actuate
 curl -k https://$HOST/api/config                                    # export config
 curl -k https://$HOST/api/system/info                               # time, heap, Wi-Fi, mDNS
 ```

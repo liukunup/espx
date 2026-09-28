@@ -177,13 +177,13 @@ mosquitto_sub -h $BROKER -t "$PREFIX/attrs/#" -v             # 查询响应
 | GET/PUT | `/api/network` | MQTT 与网络配置 |
 | GET | `/api/config` | 导出完整配置 |
 | **POST** | **`/api/config`** | **应用配置文档（YAML 或 JSON）** |
-| GET | `/api/devices` | 设备列表（含实时值） |
-| POST | `/api/devices` | 新增设备 `{id,type,config}` |
-| POST | `/api/devices/reload` | 重新初始化所有设备 |
-| GET | `/api/device-types` | 驱动目录与默认配置 |
-| GET | `/api/devices/*` | 单个设备详情 |
-| POST | `/api/devices/*` | `<id>` 改配置、`<id>/read`、`<id>/write`、`<id>/enable` |
-| DELETE | `/api/devices/*` | 删除设备 |
+| GET | `/api/peripherals` | 设备列表（含实时值） |
+| POST | `/api/peripherals` | 新增设备 `{id,type,config}` |
+| POST | `/api/peripherals/reload` | 重新初始化所有设备 |
+| GET | `/api/peripheral/options` | 驱动目录与默认配置 |
+| GET | `/api/peripherals/*` | 单个设备详情 |
+| POST | `/api/peripherals/*` | `<id>` 改配置、`<id>/read`、`<id>/write`、`<id>/enable` |
+| DELETE | `/api/peripherals/*` | 删除设备 |
 | GET | `/api/ota/status` | OTA 状态、进度、字节数 |
 | POST | `/api/ota/start` | `{"url":"http://…/fw.patch"}` |
 | POST | `/api/ota/cancel` | 取消升级 |
@@ -192,8 +192,8 @@ mosquitto_sub -h $BROKER -t "$PREFIX/attrs/#" -v             # 查询响应
 | POST | `/api/system/testmode` | 重启进入产线自检 |
 | WS | `/ws` | 实时状态推送与命令（见第 5 节） |
 
-`/api/devices/*` 是单一分发器：ESP-IDF 的 HTTP 服务只支持**末尾**通配符，
-`/api/devices/*/read` 这类中间通配永远不会匹配，因此改为在处理器内解析路径。
+`/api/peripherals/*` 是单一分发器：ESP-IDF 的 HTTP 服务只支持**末尾**通配符，
+`/api/peripherals/*/read` 这类中间通配永远不会匹配，因此改为在处理器内解析路径。
 
 ### 示例
 
@@ -206,17 +206,17 @@ curl -k -X POST https://$HOST/api/config \
 curl -k https://$HOST/api/config | python3 -m json.tool
 
 # 设备列表
-curl -k https://$HOST/api/devices | python3 -m json.tool
+curl -k https://$HOST/api/peripherals | python3 -m json.tool
 
 # 写 / 读
-curl -k -X POST https://$HOST/api/devices/relay_a/write -d 'true'
-curl -k -X POST https://$HOST/api/devices/relay_a/read
+curl -k -X POST https://$HOST/api/peripherals/relay_a/write -d 'true'
+curl -k -X POST https://$HOST/api/peripherals/relay_a/read
 
 # 启用 / 禁用
-curl -k -X POST https://$HOST/api/devices/relay_a/enable -d '{"enabled":false}'
+curl -k -X POST https://$HOST/api/peripherals/relay_a/enable -d '{"enabled":false}'
 
 # 删除
-curl -k -X DELETE https://$HOST/api/devices/relay_a
+curl -k -X DELETE https://$HOST/api/peripherals/relay_a
 
 # 系统信息
 curl -k https://$HOST/api/system/info | python3 -m json.tool
@@ -336,11 +336,11 @@ true                                  // 或 {"state": true}
 {"pixels":[{"r":255,"g":0,"b":0}, …]} // 逐颗
 ```
 
-能力位含义（`GET /api/device-types` 可见）：
+能力位含义（`GET /api/peripheral/options` 可见）：
 
 | 位 | 含义 | 影响 |
 |---|---|---|
-| `R` READ | 可读值 | 出现在 `/api/devices` 与自检的 read 项 |
+| `R` READ | 可读值 | 出现在 `/api/peripherals` 与自检的 read 项 |
 | `W` WRITE | 可控制 | 支持 `cmd/control`、`/write`、自检的 toggle 项 |
 | `N` NOTIFY | 变化通知 | 值变化时发布事件（WS/MQTT 立即推送） |
 | `P` PERIODIC | 周期采样 | 归入 MQTT `sensors` 主题 |

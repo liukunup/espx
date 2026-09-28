@@ -256,11 +256,11 @@ devices:
 EOF
 
 # Send a frame
-curl -k -X POST https://$HOST/api/devices/can1/write -d '{"id":123,"data":[1,2,3,4]}'
+curl -k -X POST https://$HOST/api/peripherals/can1/write -d '{"id":123,"data":[1,2,3,4]}'
 # Expect: 200 OK
 
 # Read back (queue may be empty if no peer device)
-curl -k https://$HOST/api/devices/can1
+curl -k https://$HOST/api/peripherals/can1
 # If a frame was received: {"id":..., "data":[...], "ext":false, "rtr":false}
 ```
 
@@ -281,8 +281,8 @@ devices:
     config: {sda_gpio: 10, scl_gpio: 11, vref_mv: 3300}
 EOF
 
-curl -k -X POST https://$HOST/api/devices/dac1/write -d '2048'
-curl -k https://$HOST/api/devices/dac1
+curl -k -X POST https://$HOST/api/peripherals/dac1/write -d '2048'
+curl -k https://$HOST/api/peripherals/dac1
 # Expect: {"value":2048,"voltage_mv":1650.00,"vref_mv":3300}
 ```
 
@@ -301,7 +301,7 @@ devices:
     config: {sda_gpio: 10, scl_gpio: 11, channel: 0, gain: 1, interval_ms: 500}
 EOF
 
-curl -k https://$HOST/api/devices/adc1
+curl -k https://$HOST/api/peripherals/adc1
 # Expect: {"raw":..., "mv":...}
 ```
 
@@ -322,7 +322,7 @@ devices:
     config: {sda_gpio: 10, scl_gpio: 11, r_shunt: 10, max_current_ma: 1000, interval_ms: 500}
 EOF
 
-curl -k https://$HOST/api/devices/pwr1
+curl -k https://$HOST/api/peripherals/pwr1
 # Expect: {"bus_voltage_mv":..., "shunt_voltage_uv":..., "current_ma":..., "power_mw":...}
 ```
 
@@ -342,18 +342,18 @@ devices:
 EOF
 
 # Immediate on/off
-curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":true}'
-curl -k https://$HOST/api/devices/buzzer1
+curl -k -X POST https://$HOST/api/peripherals/buzzer1/write -d '{"on":true}'
+curl -k https://$HOST/api/peripherals/buzzer1
 # Expect: {"on":true, "frequency":2000, "duty":50, "remaining_ms":0}
 
-curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":false}'
-curl -k https://$HOST/api/devices/buzzer1
+curl -k -X POST https://$HOST/api/peripherals/buzzer1/write -d '{"on":false}'
+curl -k https://$HOST/api/peripherals/buzzer1
 # Expect: {"on":false,...}
 
 # Auto-off after 200ms
-curl -k -X POST https://$HOST/api/devices/buzzer1/write -d '{"on":true,"duration_ms":200}'
+curl -k -X POST https://$HOST/api/peripherals/buzzer1/write -d '{"on":true,"duration_ms":200}'
 # Wait 300ms
-curl -k https://$HOST/api/devices/buzzer1
+curl -k https://$HOST/api/peripherals/buzzer1
 # Expect: {"on":false,...}
 ```
 
@@ -466,21 +466,21 @@ regenerate with `tools/gen_certs.sh` and rebuild).
 IP=192.168.x.y
 
 # add
-curl -k -s -X POST https://$IP/api/devices -H 'Content-Type: application/json' \
+curl -k -s -X POST https://$IP/api/peripherals -H 'Content-Type: application/json' \
      -d '{"id":"r1","type":"relay","config":{"gpio":5,"active_level":1}}'
 
 # list with live value
-curl -k -s https://$IP/api/devices | python3 -m json.tool
+curl -k -s https://$IP/api/peripherals | python3 -m json.tool
 
 # write / read
-curl -k -s -X POST https://$IP/api/devices/r1/write -H 'Content-Type: application/json' -d 'true'
-curl -k -s -X POST https://$IP/api/devices/r1/read
+curl -k -s -X POST https://$IP/api/peripherals/r1/write -H 'Content-Type: application/json' -d 'true'
+curl -k -s -X POST https://$IP/api/peripherals/r1/read
 
 # disable / enable
-curl -k -s -X POST https://$IP/api/devices/r1/enable -H 'Content-Type: application/json' -d '{"enabled":false}'
+curl -k -s -X POST https://$IP/api/peripherals/r1/enable -H 'Content-Type: application/json' -d '{"enabled":false}'
 
 # delete
-curl -k -s -X DELETE https://$IP/api/devices/r1
+curl -k -s -X DELETE https://$IP/api/peripherals/r1
 ```
 
 **Expect** each call to return `"success": true` (or the requested value), and
@@ -713,7 +713,7 @@ fails (missing `otadata` partition).
 
 **Proves:** NVS is not touched by an application update.
 
-Before T3.3, note `/api/devices`. After the OTA, re-check it — devices, node
+Before T3.3, note `/api/peripherals`. After the OTA, re-check it — devices, node
 identity and MQTT settings must be unchanged.
 
 ---

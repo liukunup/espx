@@ -72,7 +72,7 @@ Capability bits drive behaviour automatically:
 
 | Capability | Meaning | Effect |
 |---|---|---|
-| `READ` | can report a value | exposed via `GET /api/devices`, `read` in self-test |
+| `READ` | can report a value | exposed via `GET /api/peripherals`, `read` in self-test |
 | `WRITE` | can be actuated | exposed via MQTT `cmd/control`, `POST …/write`, toggled in self-test |
 | `NOTIFY` | emits change events | published by the device on change |
 | `PERIODIC` | sampled on a timer | grouped into the MQTT `sensors` topic |
@@ -205,22 +205,22 @@ paths win over the wildcard dispatcher.
 | GET/PUT | `/api/node` | node identity |
 | GET | `/api/system/info` | uptime, heap, Wi-Fi SSID/RSSI, IP |
 | GET/PUT | `/api/network` | MQTT broker, credentials, topic prefix |
-| GET | `/api/devices` | device list **with live values** |
-| POST | `/api/devices` | add device `{id,type,config}` |
-| POST | `/api/devices/reload` | deinit + re-init all devices |
-| GET | `/api/device-types` | driver catalogue + default configs |
+| GET | `/api/peripherals` | device list **with live values** |
+| POST | `/api/peripherals` | add device `{id,type,config}` |
+| POST | `/api/peripherals/reload` | deinit + re-init all devices |
+| GET | `/api/peripheral/options` | driver catalogue + default configs |
 | GET | `/api/ota/status` | OTA state, progress, bytes |
 | POST | `/api/ota/start` | `{"url":"http://…/fw.patch"}` |
 | POST | `/api/ota/cancel` | cancel a running update |
 | GET | `/api/certs/info` | certificate metadata |
 | POST | `/api/system/reboot` | reboot |
 | POST | `/api/system/testmode` | reboot into manufacturing test mode |
-| GET | `/api/devices/*` | device detail |
-| POST | `/api/devices/*` | `<id>` update config, `<id>/read`, `<id>/write`, `<id>/enable` |
-| DELETE | `/api/devices/*` | remove device |
+| GET | `/api/peripherals/*` | device detail |
+| POST | `/api/peripherals/*` | `<id>` update config, `<id>/read`, `<id>/write`, `<id>/enable` |
+| DELETE | `/api/peripherals/*` | remove device |
 
-`/api/devices/*` is a single dispatcher because the ESP-IDF HTTP server only
-supports a trailing `*` wildcard — `/api/devices/*/read` would never match.
+`/api/peripherals/*` is a single dispatcher because the ESP-IDF HTTP server only
+supports a trailing `*` wildcard — `/api/peripherals/*/read` would never match.
 
 ### 4.3 WebSocket
 
