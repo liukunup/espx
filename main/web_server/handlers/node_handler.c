@@ -5,17 +5,15 @@
 
 #include <string.h>
 
-#include <esp_log.h>
 #include <cJSON.h>
 
 #include "handlers.h"
 #include "json_utils.h"
 #include "node_config.h"
 #include "app_info.h"
-#include "config_apply.h"
 #include "device_manager.h"
 
-/* api_node_handler() moves here verbatim from web_server.c, with two changes:
+/* api_node_handler() moves here verbatim from web_server.c, with three changes:
  *   - send_json(...)      -> api_send_json(...)
  *   - send_error(...)     -> api_send_error(...)
  *   - json_set_string(..) -> json_set_string(..) from json_utils.h

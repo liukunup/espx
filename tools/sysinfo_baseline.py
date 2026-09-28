@@ -41,7 +41,7 @@ def main():
     print(f"iram_min   {ram.get('iram_min')}   (lowest seen - leak indicator)")
     print(f"iram_total {ram.get('iram_total')}")
     print(f"psram_free {ram.get('psram_free')}")
-    print(f"psram_total{ram.get('psram_total')}")
+    print(f"psram_total {ram.get('psram_total')}")
     print("\ntasks (stack_free_bytes):")
     for t in sorted(first.get("tasks", []),
                     key=lambda x: x.get("stack_free_bytes", 0)):

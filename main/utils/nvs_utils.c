@@ -11,7 +11,7 @@
 
 #include "nvs_utils.h"
 
-static const char *TAG = "nvs_utils";
+static const char *const TAG = "nvs_utils";
 
 esp_err_t nvs_load_alloc(const char *ns, const char *key, char **out)
 {

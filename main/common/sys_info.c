@@ -85,7 +85,11 @@ void sys_info_add(cJSON *json)
     cJSON *ram = cJSON_AddObjectToObject(json, "ram");
     /* Internal RAM is the pool that runs out (Wi-Fi, TLS, PSA crypto);
      * the headline free-heap figure includes PSRAM and hides it. Report it
-     * separately so exhaustion is visible before it fails an allocation. */
+     * separately so exhaustion is visible before it fails an allocation.
+     *
+     * iram_* is the direct heap_caps_* reading of this internal pool;
+     * internal_* is the pre-existing sys_stats view of the same pool,
+     * retained for the web UI. Both describe the same RAM. */
     cJSON_AddNumberToObject(ram, "iram_free",
                             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(ram, "iram_min",

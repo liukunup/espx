@@ -9,7 +9,6 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <nvs_flash.h>
 #include <nvs.h>
 #include <esp_log.h>
 #include <cJSON.h>
@@ -18,6 +17,7 @@
 #include "device_manager.h"
 #include "device_type.h"
 #include "event_bus.h"
+#include "json_utils.h"
 #include "node_config.h"
 #include "nvs_utils.h"
 #include "str_utils.h"
@@ -157,29 +157,29 @@ esp_err_t device_manager_load(void)
     if (cJSON_IsArray(array)) {
         cJSON *item;
         cJSON_ArrayForEach(item, array) {
-            cJSON *id = cJSON_GetObjectItem(item, "id");
-            cJSON *type = cJSON_GetObjectItem(item, "type");
+            const char *id = json_get_string(item, "id", NULL);
+            const char *type = json_get_string(item, "type", NULL);
             cJSON *config = cJSON_GetObjectItem(item, "config");
             cJSON *enabled = cJSON_GetObjectItem(item, "enabled");
 
-            if (!cJSON_IsString(id) || !cJSON_IsString(type)) continue;
+            if (id == NULL || type == NULL) continue;
 
-            if (device_add(id->valuestring, type->valuestring, config) != ESP_OK) {
+            if (device_add(id, type, config) != ESP_OK) {
                 continue;
             }
 
             /* Only disable when the field is explicitly present and false;
              * a missing "enabled" key means enabled. */
             if (enabled != NULL && cJSON_IsBool(enabled) && !cJSON_IsTrue(enabled)) {
-                device_set_enabled(id->valuestring, false);
+                device_set_enabled(id, false);
             }
 
             /* Restore state for actuators */
             cJSON *state = cJSON_GetObjectItem(item, "state");
             if (state != NULL) {
-                device_t *dev = device_get(id->valuestring);
+                device_t *dev = device_get(id);
                 if (dev != NULL && dev->type->save_state) {
-                    device_write(id->valuestring, state);
+                    device_write(id, state);
                 }
             }
         }

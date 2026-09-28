@@ -7,7 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include <nvs_flash.h>
 #include <nvs.h>
 #include <esp_log.h>
 #include <esp_mac.h>
