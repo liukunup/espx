@@ -1517,6 +1517,21 @@ Expected: `core/ is empty`
 
 并在该节「规则」列表里把 `yaml.c 只依赖 cJSON 与 libc` 一条中的路径补为 `config/yaml.c`。
 
+**同时修正同文件 §6「工作方式」里的过时路径**（Task 7 的移动使这里失效）：
+
+```
+  * 主机单元测试：`gcc ... main/core/yaml.c` + `tests/yaml_test*.c`
+```
+改为：
+```
+  * 主机单元测试：`tests/run_yaml_tests.sh`（内部使用 `main/config/yaml.c`）
+```
+
+验证：
+```bash
+grep -n "main/core" AGENT.md   # 期望：无输出
+```
+
 - [ ] **Step 7: 编译验证**
 
 ```bash
@@ -2826,6 +2841,7 @@ utils/* → (libc, cJSON, NVS)    # 不反向依赖任何业务模块
 
 - 目录树替换为新结构（同 Step 1）。
 - 「新增驱动必须」步骤保持；新增一节「新增 API 端点」：在 `main/web_server/handlers/<area>_handler.c` 添加 handler，并在同文件的 `*_register()` 中注册；通配路由必须最后注册。
+- **修正 Task 7 移动后遗留的过时路径**（约第 327 行）：「再改 `main/core/yaml.c`」→「再改 `main/config/yaml.c`」。
 - 构建/测试命令区加入：
 
 ```bash
