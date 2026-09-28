@@ -9,6 +9,7 @@ set(espx_sources
     # Shared helpers
     "utils/json_utils.c"
     "utils/str_utils.c"
+    "utils/nvs_utils.c"
 
     # Core services
     "core/device_type.c"
