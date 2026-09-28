@@ -1968,6 +1968,35 @@ cd /Users/liukunup/Documents/repo/GitHub/espx
 grep -n "strncpy(" main/mfg_provision/mfg_provision.c || echo "no strncpy in mfg_provision.c OK"
 ```
 
+- [ ] **Step 6b: `web_server.c` —— 删除重复的本地 `mac_to_str`（否则 include 冲突）**
+
+`web_server.c:688` 定义了一个本地 `static char* mac_to_str(uint8_t *mac)`（**返回 static 缓冲区，不可重入**），
+与 `str_utils.h` 的 `void mac_to_str(const uint8_t *, char *, size_t)` 签名不同。
+若只加 `#include "str_utils.h"` 会在 `-Werror` 下报
+`static declaration of 'mac_to_str' follows non-static declaration`。
+
+因此必须**删掉本地定义**（它本就是 utils 要消除的重复实现），并把唯一调用点
+（`api_wifi_scan_handler`）改为使用 utils 版本：
+
+```c
+        char bssid[18];
+        mac_to_str((const uint8_t *)&ap_info[i].bssid, bssid, sizeof(bssid));
+        cJSON_AddStringToObject(net, "bssid", bssid);
+```
+
+替换原来的一行式 `cJSON_AddStringToObject(net, "bssid", mac_to_str((uint8_t *)&ap_info[i].bssid));`。
+这样 `web_server.c` 就能安全地 `#include "str_utils.h"`，且顺带消除了一个不可重入的静态缓冲区。
+
+验证：
+
+```bash
+grep -n "static char\* mac_to_str" main/web_server/web_server.c || echo "local mac_to_str removed OK"
+```
+
+> `web_server.c:50` 的本地 `static void json_set_string(...)` 与 `json_utils.h` 签名**相同**，
+> 本任务**不动它**（Task 12/14 处理）；因此本任务 `web_server.c` **只** include `str_utils.h`，
+> **不** include `json_utils.h`。
+
 - [ ] **Step 7: 断言无遗留**
 
 ```bash
@@ -2028,7 +2057,7 @@ git commit -m "refactor: replace strncpy(size-1) idiom with str_copy"
 **过渡期约束（避免构建中断）：** 在 Task 14 把 wifi handler 也迁走之前，
 `web_server.c` 仍会用到 `send_json` / `send_error` / `json_set_string` / `mac_to_str`。
 因此 Task 12 **只把 `send_json`/`send_error` 改为对 `api_send_json`/`api_send_error`
-的一行转发，并保留本地 static 的 `json_set_string` / `mac_to_str`**；
+的一行转发，并保留本地 static 的 `json_set_string`**（`mac_to_str` 已在 Task 11 Step 6b 删除）；
 四者统一在 Task 14 Step 6 删除。
 
 - [ ] **Step 1: 创建 `handlers/handlers.h`**
@@ -2456,7 +2485,10 @@ static esp_err_t send_error(httpd_req_t *req, const char *msg, int status)
 }
 ```
 
-4. **保留**本地 `static json_set_string()`（`api_wifi_config_handler` 仍在使用）和 `static mac_to_str()`（`api_wifi_scan_handler` 仍在使用）。两者都是 `static`，且本文件**不** include `json_utils.h` / `str_utils.h`，因此不会与 utils 版本冲突。它们连同 `send_json`/`send_error` 一起在 Task 14 Step 6 删除。
+4. **保留**本地 `static json_set_string()`（`api_wifi_config_handler` 仍在使用）。它与 `json_utils.h` 签名相同，所以本文件**不** include `json_utils.h`（否则 `-Werror` 报 `static declaration follows non-static`）。
+   `static mac_to_str()` 已在 Task 11 Step 6b 删除，本任务不再保留。
+   `json_set_string` 连同 `send_json`/`send_error` 一起在 Task 14 Step 6 删除。
+   本文件的 `#include "str_utils.h"` 由 Task 11 Step 6b 加入，Task 12 保留它。
 5. **保留** `root_handler()` 与 `_binary_index_html_start/end` 符号。
 6. 把 URI 注册循环替换为按序调用：
 
