@@ -35,6 +35,7 @@
 #include "net_services/mdns_service.h"
 #include "sys_stats.h"
 #include "sys_info.h"
+#include "str_utils.h"
 
 static const char *TAG = "web_server";
 
@@ -252,8 +253,7 @@ static bool parse_device_uri(const char *uri, char *id_out, size_t id_size,
     const char *slash = strchr(rest, '/');
 
     if (slash == NULL) {
-        strncpy(id_out, rest, id_size - 1);
-        id_out[id_size - 1] = '\0';
+        str_copy(id_out, id_size, rest);
         if (action_out && action_size > 0) action_out[0] = '\0';
     } else {
         size_t id_len = slash - rest;
@@ -262,8 +262,7 @@ static bool parse_device_uri(const char *uri, char *id_out, size_t id_size,
         id_out[id_len] = '\0';
 
         if (action_out && action_size > 0) {
-            strncpy(action_out, slash + 1, action_size - 1);
-            action_out[action_size - 1] = '\0';
+            str_copy(action_out, action_size, slash + 1);
         }
     }
 
@@ -683,17 +682,6 @@ static const char* wifi_auth_mode_str(wifi_auth_mode_t mode)
 }
 
 /**
- * @brief Helper: convert MAC address to string
- */
-static char* mac_to_str(uint8_t *mac)
-{
-    static char buf[18];
-    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    return buf;
-}
-
-/**
  * @brief POST /api/system/reboot
  */
 static esp_err_t api_system_reboot_handler(httpd_req_t *req)
@@ -743,8 +731,9 @@ static esp_err_t api_wifi_scan_handler(httpd_req_t *req)
     for (int i = 0; i < count; i++) {
         cJSON *net = cJSON_CreateObject();
         cJSON_AddStringToObject(net, "ssid", (const char *)ap_info[i].ssid);
-        cJSON_AddStringToObject(net, "bssid",
-            mac_to_str((uint8_t *)&ap_info[i].bssid));
+        char bssid[18];
+        mac_to_str((const uint8_t *)&ap_info[i].bssid, bssid, sizeof(bssid));
+        cJSON_AddStringToObject(net, "bssid", bssid);
         cJSON_AddNumberToObject(net, "rssi", ap_info[i].rssi);
         cJSON_AddStringToObject(net, "auth", wifi_auth_mode_str(ap_info[i].authmode));
         cJSON_AddItemToArray(networks, net);

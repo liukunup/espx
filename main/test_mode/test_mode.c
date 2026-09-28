@@ -28,6 +28,7 @@
 #include "peripherals.h"
 #include "mfg_provision.h"
 #include "config_apply.h"
+#include "str_utils.h"
 
 static const char *TAG = "test_mode";
 
@@ -523,8 +524,7 @@ static void cmd_reset(void)
         if (dev == NULL) break;
 
         char id[sizeof(dev->id)];
-        strncpy(id, dev->id, sizeof(id) - 1);
-        id[sizeof(id) - 1] = '\0';
+        str_copy(id, sizeof(id), dev->id);
         device_remove(id);
     }
 

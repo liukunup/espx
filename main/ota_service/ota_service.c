@@ -37,6 +37,7 @@
 #endif
 
 #include "ota_service.h"
+#include "str_utils.h"
 
 static const char *TAG = "ota_service";
 
@@ -77,8 +78,7 @@ static void set_state(ota_state_t state, const char *error)
 {
     s_status.state = state;
     if (error) {
-        strncpy(s_status.error, error, sizeof(s_status.error) - 1);
-        s_status.error[sizeof(s_status.error) - 1] = '\0';
+        str_copy(s_status.error, sizeof(s_status.error), error);
     }
     if (s_progress_cb) {
         s_progress_cb(&s_status, s_progress_user);
@@ -198,12 +198,11 @@ static void ota_task(void *arg)
 
     const esp_app_desc_t *app = esp_app_get_description();
     if (app) {
-        strncpy(s_status.running_version, app->version,
-                sizeof(s_status.running_version) - 1);
+        str_copy(s_status.running_version, sizeof(s_status.running_version),
+                 app->version);
     }
 
-    strncpy(s_status.url, url, sizeof(s_status.url) - 1);
-    s_status.url[sizeof(s_status.url) - 1] = '\0';
+    str_copy(s_status.url, sizeof(s_status.url), url);
 
     buf = malloc(BUFFSIZE + 1);
     if (buf == NULL) {
@@ -410,8 +409,8 @@ esp_err_t ota_service_init(void)
      * empty string instead of the firmware it is talking to. */
     const esp_app_desc_t *app = esp_app_get_description();
     if (app) {
-        strncpy(s_status.running_version, app->version,
-                sizeof(s_status.running_version) - 1);
+        str_copy(s_status.running_version, sizeof(s_status.running_version),
+                 app->version);
     }
 
     ESP_LOGI(TAG, "OTA service initialized (delta OTA)");

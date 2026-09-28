@@ -31,6 +31,7 @@
 #include "node_config.h"
 #include "event_bus.h"
 #include "app_info.h"
+#include "str_utils.h"
 #if defined(CONFIG_MQTT_PROTOCOL_5)
 #include "mqtt5_client.h"
 #endif
@@ -164,23 +165,22 @@ static void load_network_config(void)
 
         v = cJSON_GetObjectItem(net, "mqtt_broker");
         if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-            strncpy(g_broker, v->valuestring, sizeof(g_broker) - 1);
+            str_copy(g_broker, sizeof(g_broker), v->valuestring);
         }
 
         v = cJSON_GetObjectItem(net, "mqtt_username");
         if (cJSON_IsString(v)) {
-            strncpy(g_username, v->valuestring, sizeof(g_username) - 1);
+            str_copy(g_username, sizeof(g_username), v->valuestring);
         }
 
         v = cJSON_GetObjectItem(net, "mqtt_password");
         if (cJSON_IsString(v)) {
-            strncpy(g_password, v->valuestring, sizeof(g_password) - 1);
+            str_copy(g_password, sizeof(g_password), v->valuestring);
         }
 
         v = cJSON_GetObjectItem(net, "mqtt_topic_prefix");
         if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-            strncpy(g_topic_prefix, v->valuestring, sizeof(g_topic_prefix) - 1);
-            g_topic_prefix[sizeof(g_topic_prefix) - 1] = '\0';
+            str_copy(g_topic_prefix, sizeof(g_topic_prefix), v->valuestring);
 
             /* Catch the "one fixed prefix for the whole fleet" mistake early:
              * without the device id in the prefix every node collides. */
@@ -288,13 +288,13 @@ static void mqtt_on_config_changed(const event_t *event, void *user_data)
     (void)event;
     (void)user_data;
     // Reload device_id (may have been updated), then reconfigure MQTT
-    strncpy(g_device_id, node_config_get_device_id(), sizeof(g_device_id) - 1);
+    str_copy(g_device_id, sizeof(g_device_id), node_config_get_device_id());
     mqtt_client_reconfigure();
 }
 
 esp_err_t mqtt_client_init(void)
 {
-    strncpy(g_device_id, node_config_get_device_id(), sizeof(g_device_id) - 1);
+    str_copy(g_device_id, sizeof(g_device_id), node_config_get_device_id());
     load_network_config();
     // Reconfigure when network config changes via API/MQTT
     event_bus_subscribe(EVENT_CONFIG_CHANGED, mqtt_on_config_changed, NULL);

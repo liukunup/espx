@@ -27,6 +27,7 @@
 #include "ota_service/ota_service.h"
 #include "test_mode/test_mode.h"
 #include "config_apply.h"
+#include "str_utils.h"
 
 static const char *TAG = "mqtt_commander";
 
@@ -65,8 +66,7 @@ static bool extract_cmd_target(const char *topic, const char *cmd, char *out, si
 
     // Copy rest to out
     ESP_LOGD(TAG, "extract_cmd_target: extracted device_id='%s'", p);
-    strncpy(out, p, out_size - 1);
-    out[out_size - 1] = '\0';
+    str_copy(out, out_size, p);
     return true;
 }
 

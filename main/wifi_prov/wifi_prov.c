@@ -28,6 +28,7 @@
 #include "qrcode.h"
 #include "wifi_prov.h"
 #include "node_config.h"
+#include "str_utils.h"
 
 static const char *TAG = "wifi_prov";
 
@@ -287,11 +288,11 @@ static bool read_node_wifi(char *ssid, size_t ssid_len,
     if (cJSON_IsObject(net)) {
         cJSON *v = cJSON_GetObjectItem(net, "wifi_ssid");
         if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-            strncpy(ssid, v->valuestring, ssid_len - 1);
+            str_copy(ssid, ssid_len, v->valuestring);
         }
         v = cJSON_GetObjectItem(net, "wifi_password");
         if (cJSON_IsString(v)) {
-            strncpy(password, v->valuestring, pass_len - 1);
+            str_copy(password, pass_len, v->valuestring);
         }
     }
     cJSON_Delete(cfg);
@@ -321,9 +322,9 @@ static bool start_with_node_credentials(void)
     }
 
     wifi_config_t desired = {0};
-    strncpy((char *)desired.sta.ssid, ssid, sizeof(desired.sta.ssid) - 1);
+    str_copy((char *)desired.sta.ssid, sizeof(desired.sta.ssid), ssid);
     if (password[0] != '\0') {
-        strncpy((char *)desired.sta.password, password, sizeof(desired.sta.password) - 1);
+        str_copy((char *)desired.sta.password, sizeof(desired.sta.password), password);
         desired.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     } else {
         desired.sta.threshold.authmode = WIFI_AUTH_OPEN;
