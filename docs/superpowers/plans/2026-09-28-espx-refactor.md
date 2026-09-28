@@ -2534,13 +2534,32 @@ esp_err_t device_handler_register(httpd_handle_t server)
 }
 ```
 
-- [ ] **Step 2: 在 `web_server.c` 中补上最后调用**
+- [ ] **Step 2: 在 `web_server.c` 中补上最后调用，并删除已迁出的设备 URI 条目**
 
-在 Task 12 Step 6 的注册块末尾追加：
+a) 在 Task 12 Step 6 的注册块末尾追加：
 
 ```c
     /* LAST: owns the /api/peripherals/* wildcards */
     device_handler_register(g_server);
+```
+
+b) **必须同样执行：** 从 `web_server.c` 残留的旧 `uris[]` 表中，删除本任务已迁出的 7 条设备条目，否则这些路径会被注册两次（`device_handler_register()` 返回 `ESP_ERR_HTTPD_HANDLER_EXISTS`，行为不确定）：
+
+```c
+        { .uri = "/api/peripherals",          .method = HTTP_GET,    ... }
+        { .uri = "/api/peripherals",          .method = HTTP_POST,   ... }
+        { .uri = "/api/peripherals/reload",   .method = HTTP_POST,   ... }
+        { .uri = "/api/peripheral/options",   .method = HTTP_GET,    ... }
+        { .uri = "/api/peripherals/*",        .method = HTTP_GET,    ... }
+        { .uri = "/api/peripherals/*",        .method = HTTP_POST,   ... }
+        { .uri = "/api/peripherals/*",        .method = HTTP_DELETE, ... }
+```
+
+保留 system / ota / cert / wifi 的条目（它们在 Task 14 才迁出）。
+验证无重复注册：
+
+```bash
+grep -n 'api/peripherals' main/web_server/web_server.c   # 期望：无输出
 ```
 
 - [ ] **Step 3: 编译验证**
