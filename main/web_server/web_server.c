@@ -36,6 +36,7 @@
 #include "sys_stats.h"
 #include "sys_info.h"
 #include "str_utils.h"
+#include "handlers/handlers.h"
 
 static const char *TAG = "web_server";
 
@@ -75,19 +76,7 @@ static esp_err_t root_handler(httpd_req_t *req)
  */
 static esp_err_t send_json(httpd_req_t *req, cJSON *json, int status)
 {
-    char *str = cJSON_PrintUnformatted(json);
-    if (str == NULL) return ESP_FAIL;
-
-    const char *status_str = (status == 200) ? "200 OK" :
-                             (status == 400) ? "400 Bad Request" :
-                             (status == 404) ? "404 Not Found" : "500 Internal Server Error";
-
-    httpd_resp_set_status(req, status_str);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, str, strlen(str));
-    free(str);
-    cJSON_Delete(json);
-    return ESP_OK;
+    return api_send_json(req, json, status);
 }
 
 /**
@@ -95,65 +84,7 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json, int status)
  */
 static esp_err_t send_error(httpd_req_t *req, const char *msg, int status)
 {
-    cJSON *json = cJSON_CreateObject();
-    cJSON_AddStringToObject(json, "error", msg);
-    return send_json(req, json, status);
-}
-
-/**
- * @brief GET/PUT /api/node - node info / identity
- */
-static esp_err_t api_node_handler(httpd_req_t *req)
-{
-    if (req->method == HTTP_PUT) {
-        char buf[256];
-        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-        if (len <= 0) return send_error(req, "Empty body", 400);
-        buf[len] = '\0';
-
-        cJSON *incoming = cJSON_Parse(buf);
-        if (incoming == NULL) return send_error(req, "Invalid JSON", 400);
-
-        cJSON *cfg = node_config_get();
-        if (cfg == NULL) cfg = cJSON_CreateObject();
-
-        cJSON *node = cJSON_GetObjectItem(cfg, "node");
-        if (!cJSON_IsObject(node)) {
-            node = cJSON_AddObjectToObject(cfg, "node");
-        }
-
-        const char *keys[] = { "name" };
-        for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-            cJSON *v = cJSON_GetObjectItem(incoming, keys[i]);
-            if (cJSON_IsString(v) && v->valuestring[0] != '\0') {
-                json_set_string(node, keys[i], v->valuestring);
-            }
-        }
-        /* device_id is intentionally ignored here — it is set at the factory
-         * and cannot be changed at runtime. Any incoming value is discarded. */
-
-        esp_err_t err = node_config_set(cfg);
-        cJSON_Delete(cfg);
-        cJSON_Delete(incoming);
-
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
-        return send_json(req, resp, err == ESP_OK ? 200 : 500);
-    }
-
-    cJSON *json = cJSON_CreateObject();
-    {
-        const char *id = node_config_get_device_id();
-        if (strncmp(id, "espx-", 5) == 0) {
-            id += 5;
-        }
-        cJSON_AddStringToObject(json, "device_id", id);
-    }
-    cJSON_AddStringToObject(json, "name", node_config_get_name());
-    cJSON_AddStringToObject(json, "version", app_version());
-    cJSON_AddNumberToObject(json, "peripheral_count", device_get_count());
-
-    return send_json(req, json, 200);
+    return api_send_error(req, msg, status);
 }
 
 /**
@@ -430,67 +361,6 @@ static esp_err_t api_device_types_handler(httpd_req_t *req)
 }
 
 /**
- * @brief POST /api/config - apply a configuration document (YAML or JSON)
- *
- * Body: the document itself (Content-Type: text/yaml or application/json).
- * Same semantics as the MQTT {prefix}/cmd/config interface.
- */
-static esp_err_t api_config_apply_handler(httpd_req_t *req)
-{
-    if (req->content_len <= 0 || req->content_len > 4096) {
-        return send_error(req, "missing or oversized configuration body", 400);
-    }
-
-    char *buf = malloc(req->content_len + 1);
-    if (buf == NULL) {
-        return send_error(req, "out of memory", 500);
-    }
-
-    int received = 0;
-    while (received < req->content_len) {
-        int r = httpd_req_recv(req, buf + received, req->content_len - received);
-        if (r <= 0) {
-            free(buf);
-            return send_error(req, "failed to read body", 400);
-        }
-        received += r;
-    }
-    buf[received] = '\0';
-
-    config_apply_result_t res;
-    char err[128] = {0};
-    esp_err_t rc = config_apply_payload(buf, &res, err, sizeof(err));
-    free(buf);
-
-    cJSON *out = cJSON_CreateObject();
-    cJSON_AddBoolToObject(out, "ok", rc == ESP_OK && res.devices_failed == 0);
-
-    cJSON *counts = cJSON_AddObjectToObject(out, "applied");
-    cJSON_AddNumberToObject(counts, "added", res.devices_added);
-    cJSON_AddNumberToObject(counts, "updated", res.devices_updated);
-    cJSON_AddNumberToObject(counts, "removed", res.devices_removed);
-    cJSON_AddNumberToObject(counts, "failed", res.devices_failed);
-
-    cJSON_AddBoolToObject(out, "reboot_required", res.reboot_recommended);
-    const char *msg = res.error[0] ? res.error : err;
-    if (msg[0]) cJSON_AddStringToObject(out, "error", msg);
-
-    return send_json(req, out, rc == ESP_OK ? 200 : 400);
-}
-
-/**
- * @brief GET /api/config - current configuration as JSON
- */
-static esp_err_t api_config_get_handler(httpd_req_t *req)
-{
-    cJSON *cfg = config_export();
-    if (cfg == NULL) {
-        return send_error(req, "failed to export configuration", 500);
-    }
-    return send_json(req, cfg, 200);
-}
-
-/**
  * @brief GET /api/system/info - runtime info
  */
 static esp_err_t api_system_info_handler(httpd_req_t *req)
@@ -500,67 +370,6 @@ static esp_err_t api_system_info_handler(httpd_req_t *req)
         return send_error(req, "failed to build system info", 500);
     }
     return send_json(req, json, 200);
-}
-
-/**
- * @brief GET/PUT /api/network - network (MQTT) configuration
- */
-static esp_err_t api_network_handler(httpd_req_t *req)
-{
-    if (req->method == HTTP_GET) {
-        cJSON *cfg = node_config_get();
-        cJSON *net = cfg ? cJSON_GetObjectItem(cfg, "network") : NULL;
-        cJSON *out = net ? cJSON_Duplicate(net, true) : cJSON_CreateObject();
-        if (cfg) cJSON_Delete(cfg);
-        return send_json(req, out, 200);
-    }
-
-    if (req->method == HTTP_PUT) {
-        char buf[512];
-        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
-        if (len <= 0) return send_error(req, "Empty body", 400);
-        buf[len] = '\0';
-
-        cJSON *incoming = cJSON_Parse(buf);
-        if (incoming == NULL) return send_error(req, "Invalid JSON", 400);
-
-        cJSON *cfg = node_config_get();
-        if (cfg == NULL) cfg = cJSON_CreateObject();
-
-        cJSON *net = cJSON_GetObjectItem(cfg, "network");
-        if (!cJSON_IsObject(net)) {
-            net = cJSON_AddObjectToObject(cfg, "network");
-        }
-
-        cJSON *item = incoming->child;
-        while (item != NULL) {
-            if (cJSON_IsString(item)) {
-                json_set_string(net, item->string, item->valuestring);
-            } else if (cJSON_IsNumber(item) || cJSON_IsBool(item)) {
-                cJSON *dup = cJSON_Duplicate(item, true);
-                cJSON_DeleteItemFromObject(net, item->string);
-                cJSON_AddItemToObject(net, item->string, dup);
-            }
-            /* Never log secrets */
-            if (strstr(item->string, "password") != NULL) {
-                ESP_LOGI(TAG, "Network config: %s = <set>", item->string);
-            } else {
-                ESP_LOGI(TAG, "Network config: %s = %s", item->string,
-                         cJSON_IsString(item) ? item->valuestring : "<non-string>");
-            }
-            item = item->next;
-        }
-
-        esp_err_t err = node_config_set(cfg);
-        cJSON_Delete(cfg);
-        cJSON_Delete(incoming);
-
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
-        return send_json(req, resp, err == ESP_OK ? 200 : 500);
-    }
-
-    return send_error(req, "Method not allowed", 400);
 }
 
 /**
@@ -850,17 +659,11 @@ esp_err_t web_server_start(void)
     // Register handlers - ORDER MATTERS: exact paths before wildcards
     const httpd_uri_t uris[] = {
         { .uri = "/",                   .method = HTTP_GET,    .handler = root_handler },
-        { .uri = "/api/node",           .method = HTTP_GET,    .handler = api_node_handler },
-        { .uri = "/api/node",           .method = HTTP_PUT,    .handler = api_node_handler },
         { .uri = "/api/system/info",    .method = HTTP_GET,    .handler = api_system_info_handler },
-        { .uri = "/api/network",        .method = HTTP_GET,    .handler = api_network_handler },
-        { .uri = "/api/network",        .method = HTTP_PUT,    .handler = api_network_handler },
         { .uri = "/api/peripherals",        .method = HTTP_GET,    .handler = api_devices_list_handler },
         { .uri = "/api/peripherals",        .method = HTTP_POST,   .handler = api_device_add_handler },
         { .uri = "/api/peripherals/reload", .method = HTTP_POST,   .handler = api_devices_reload_handler },
         { .uri = "/api/peripheral/options",   .method = HTTP_GET,    .handler = api_device_types_handler },
-        { .uri = "/api/config",         .method = HTTP_GET,    .handler = api_config_get_handler },
-        { .uri = "/api/config",         .method = HTTP_POST,   .handler = api_config_apply_handler },
         { .uri = "/api/ota/status",     .method = HTTP_GET,    .handler = api_ota_status_handler },
         { .uri = "/api/ota/start",      .method = HTTP_POST,   .handler = api_ota_start_handler },
         { .uri = "/api/ota/cancel",     .method = HTTP_POST,   .handler = api_ota_cancel_handler },
@@ -880,6 +683,12 @@ esp_err_t web_server_start(void)
             ESP_LOGE(TAG, "Failed to register %s", uris[i].uri);
         }
     }
+
+    /* Migrated modules register themselves. The /api/peripherals wildcards
+     * move to device_handler_register() in Task 13, which must run last. */
+    node_handler_register(g_server);
+    network_handler_register(g_server);
+    config_handler_register(g_server);
 
 #if CONFIG_ESPX_WS_ENABLE
     if (ws_server_start(g_server) != ESP_OK) {

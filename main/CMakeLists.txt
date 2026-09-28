@@ -54,6 +54,10 @@ set(espx_sources
     "cert_manager/cert_manager.c"
     "web_server/web_server.c"
     "web_server/ws_server.c"
+    "web_server/handlers/handlers_common.c"
+    "web_server/handlers/node_handler.c"
+    "web_server/handlers/network_handler.c"
+    "web_server/handlers/config_handler.c"
 
     # Wi-Fi provisioning
     "wifi_prov/wifi_prov.c"
