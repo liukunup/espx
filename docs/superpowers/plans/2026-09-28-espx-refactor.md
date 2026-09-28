@@ -1843,15 +1843,20 @@ git commit -m "refactor(config,device): use json/str/nvs utils, drop duplicated 
 
 机械替换，逐文件进行。**仅替换 `strncpy` 调用，不改动其他逻辑。**
 
-**Files:**
-- Modify: `main/mqtt_client/espx_mqtt_client.c`（7 处）
+**Files:**（站点数为执行前实测值，共 **18 处 / 6 个文件**）
+- Modify: `main/mqtt_client/espx_mqtt_client.c`（6 处）
 - Modify: `main/mqtt_client/mqtt_commander.c`（1 处）
 - Modify: `main/ota_service/ota_service.c`（4 处）
-- Modify: `main/wifi_prov/wifi_prov.c`（2 处）
-- Modify: `main/mfg_provision/mfg_provision.c`（按实际命中）
+- Modify: `main/wifi_prov/wifi_prov.c`（4 处：`ssid` / `password` / `desired.sta.ssid` / `desired.sta.password`）
+- Modify: `main/test_mode/test_mode.c`（1 处，第 526 行 `id`）
+- Modify: `main/web_server/web_server.c`（2 处，`parse_device_uri()` 的 `id_out` / `action_out`；
+  Task 13 会把这段代码迁到 `device_handler.c`，此处先迁移，迁走后代码即为已迁移版本）
+- `main/mfg_provision/mfg_provision.c`：**无需改动**。它用 `nvs_open_from_partition()` 读自定义
+  `MFG_PARTITION_NAME` 分区，**没有 `strncpy` 站点**，且无法套用 `nvs_load_alloc`（后者用普通
+  `nvs_open`）。不要在此文件强行替换。
 
 **Interfaces:**
-- Consumes: `str_utils.h`（Task 5）、`nvs_utils.h`（Task 6，仅 `mfg_provision.c` 的 NVS 读取）
+- Consumes: `str_utils.h`（Task 5）。**不**消费 `nvs_utils.h`（见上：`mfg_provision.c` 用的是自定义分区 API）
 - Produces: 无对外变更
 
 **精确替换规则：** 所有匹配下列形态的语句
@@ -1950,21 +1955,18 @@ grep -rn "strncpy(" main/ --include="*.c" | grep -v managed_components
 
 新增 `#include "str_utils.h"`。
 
-- [ ] **Step 6: 改写 `mfg_provision.c`**
+- [ ] **Step 6: `mfg_provision.c` —— 不改动（已核实）**
 
-按 Step 1 的实际命中替换 `strncpy` 站点（新增 `#include "str_utils.h"`），并把其中重复的「两次 `nvs_get_str` + malloc」读取（第 59、187-199 行附近）改为 `nvs_load_alloc()`：
+执行前已核实：该文件用 `nvs_open_from_partition(MFG_PARTITION_NAME, ...)` 读**自定义分区**，
+且**没有任何 `strncpy` 站点**。因此本任务**不修改此文件**，也不套用 `nvs_load_alloc`
+（后者基于普通 `nvs_open`，命名空间/分区语义不同）。
 
-```c
-    char *json = NULL;
-    esp_err_t err = nvs_load_alloc(MFG_NVS_PARTITION_NAMESPACE, MFG_NVS_KEY, &json);
-    if (err != ESP_OK) {
-        return err;
-    }
-    /* ... parse json ... */
-    free(json);
+只用一条 grep 记录「确无站点」：
+
+```bash
+cd /Users/liukunup/Documents/repo/GitHub/espx
+grep -n "strncpy(" main/mfg_provision/mfg_provision.c || echo "no strncpy in mfg_provision.c OK"
 ```
-
-> 若 `mfg_provision.c` 的 NVS 读取使用了**与 `nvs_load_alloc` 不同的命名空间或分区 API**（如自定义分区），则**只做 `strncpy` → `str_copy`**，不要强行套用 `nvs_load_alloc`。以实际读取方式为准。
 
 - [ ] **Step 7: 断言无遗留**
 
