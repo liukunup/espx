@@ -58,6 +58,10 @@ set(espx_sources
     "web_server/handlers/node_handler.c"
     "web_server/handlers/network_handler.c"
     "web_server/handlers/config_handler.c"
+    "web_server/handlers/system_handler.c"
+    "web_server/handlers/ota_handler.c"
+    "web_server/handlers/cert_handler.c"
+    "web_server/handlers/wifi_handler.c"
     "web_server/handlers/device_handler.c"
 
     # Wi-Fi provisioning
