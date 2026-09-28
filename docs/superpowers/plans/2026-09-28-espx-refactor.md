@@ -2490,26 +2490,38 @@ static esp_err_t send_error(httpd_req_t *req, const char *msg, int status)
    `json_set_string` 连同 `send_json`/`send_error` 一起在 Task 14 Step 6 删除。
    本文件的 `#include "str_utils.h"` 由 Task 11 Step 6b 加入，Task 12 保留它。
 5. **保留** `root_handler()` 与 `_binary_index_html_start/end` 符号。
-6. 把 URI 注册循环替换为按序调用：
+6. **保留原有的 `uris[]` 表与注册循环**（不要删除这个循环），只从表里删掉已迁出的 6 条；
+   然后在循环**之后**追加已迁出模块的注册调用。这样未迁出的 handler
+   （`/`、device、system、ota、cert、wifi）仍由原循环注册，已迁出的 3 个模块由新调用注册。
 
-```c
-    /* Root first: the embedded UI. */
-    static const httpd_uri_t root_uri = {
-        .uri = "/", .method = HTTP_GET, .handler = root_handler,
-    };
-    if (httpd_register_uri_handler(g_server, &root_uri) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register /");
-    }
+   a) 从 `uris[]` 表中**删除**这 6 条（只是从表里删，循环本身保留）：
 
-    /* Exact paths first; the /api/peripherals/* wildcards are registered by
-     * device_handler_register(), which must run last (Task 13). */
+   ```c
+        { .uri = "/api/node",        .method = HTTP_GET,  .handler = api_node_handler },
+        { .uri = "/api/node",        .method = HTTP_PUT,  .handler = api_node_handler },
+        { .uri = "/api/network",     .method = HTTP_GET,  .handler = api_network_handler },
+        { .uri = "/api/network",     .method = HTTP_PUT,  .handler = api_network_handler },
+        { .uri = "/api/config",      .method = HTTP_GET,  .handler = api_config_get_handler },
+        { .uri = "/api/config",      .method = HTTP_POST, .handler = api_config_apply_handler },
+   ```
+
+   `uris[]` 中**保留** `/`、`/api/peripherals*`、`/api/peripheral/options`、
+   `/api/system/*`、`/api/ota/*`、`/api/certs/info`、`/api/wifi/*`
+   （这些 handler 本任务不迁出）。
+
+   b) 在原有的 for 注册循环**之后**追加：
+
+   ```c
+    /* Migrated modules register themselves. The /api/peripherals/* wildcards
+     * move to device_handler_register() in Task 13, which must run last. */
     node_handler_register(g_server);
     network_handler_register(g_server);
     config_handler_register(g_server);
-```
+   ```
 
-> 剩余未迁出的 handler（device/system/ota/cert/wifi）此时**仍由原 URI 表注册**。保留原 URI 表中除已迁出四条之外的所有条目，删掉已迁出的
-> `/api/node`（GET/PUT）、`/api/network`（GET/PUT）、`/api/config`（GET/POST）共 6 条。
+   > 本步骤结束时，`uris[]` 循环里**不得**再有 `/api/node`、`/api/network`、`/api/config`
+   > 任一条目（否则与新的 register 调用重复注册，`httpd_register_uri_handler` 返回
+   > `ESP_ERR_HTTPD_HANDLER_EXISTS`）。
 
 编译并验证 `EMBED_FILES` 符号仍链接：
 
