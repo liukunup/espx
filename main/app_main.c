@@ -31,8 +31,8 @@
 #include "mfg_provision/mfg_provision.h"
 #include "ota_service/ota_service.h"
 #include "net_services/net_services.h"
-#include "core/sys_stats.h"
-#include "core/defaults.h"
+#include "sys_stats.h"
+#include "defaults.h"
 
 static const char *TAG = "app_main";
 

@@ -11,10 +11,10 @@ set(espx_sources
     "utils/str_utils.c"
     "utils/nvs_utils.c"
 
-    # Core services
-    "core/sys_stats.c"
-    "core/sys_info.c"
-    "core/defaults.c"
+    # Common services
+    "common/sys_stats.c"
+    "common/sys_info.c"
+    "common/defaults.c"
 
     # Device model
     "device/device_type.c"
@@ -73,7 +73,7 @@ set(espx_include_dirs
     "utils"
     "config"
     "device"
-    "core"
+    "common"
     "peripherals"
     "mqtt_client"
     "cert_manager"

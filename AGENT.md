@@ -204,24 +204,24 @@ devices:
 ## 5. 分层（依赖只能向下）
 
 ```
-        config_apply            配置语义（唯一真相入口）
+        config_apply            配置语义（唯一真相入口）      [config/]
        /     |      \
    mqtt     https    console     三条通道，只做解析与转发
        \     |      /
-        yaml (可选)              YAML → cJSON，不依赖 ESP-IDF
+        yaml (可选)              YAML → cJSON，不依赖 ESP-IDF   [config/yaml.c]
              |
-  device_manager · node_config · event_bus
+  device_manager · node_config · event_bus   [device/ · config/]
              |
-       device_type 目录
+       device_type 目录                              [device/]
              |
-        peripherals 驱动
+        peripherals 驱动                            [peripherals/]
              |
           ESP-IDF HAL
 ```
 
 规则：
 
-* `yaml.c` 只依赖 cJSON 与 libc —— **必须可主机单元测试**。任何 ESP-IDF 依赖都不许进。
+* `config/yaml.c` 只依赖 cJSON 与 libc —— **必须可主机单元测试**。任何 ESP-IDF 依赖都不许进。
 * 通道层（mqtt/https/console）不含配置语义，只做解析 + 调用 `config_apply()` + 回执。
 * 驱动不反向依赖 `device_manager`（`device_manager` 调用驱动的函数指针，反向只需 `device_t` 定义）。
 
@@ -233,7 +233,7 @@ devices:
 * 目标芯片固定在 `sdkconfig.defaults` 的 `CONFIG_IDF_TARGET`；删掉 `sdkconfig` 后重建也必须仍是 `esp32s3`。
 * 证书、网页等资源以**项目文件**形式维护，构建时嵌入（CMake `EMBED_FILES`），**不得把内容写进 C 代码**。
 * 提交前跑：
-  * 主机单元测试：`gcc ... main/core/yaml.c` + `tests/yaml_test*.c`
+  * 主机单元测试：`tests/run_yaml_tests.sh`（内部使用 `main/config/yaml.c`）
   * 设备回归：`python3 tools/espx_test.py --port <port> all`
   * 网络回归：`python3 tools/network_tests.py --device-ip <ip> --local-ip <ip> --patch <p>`
 * 每个行为变更同步更新 `docs/ARCHITECTURE.md`；每个新增用例同步更新 `docs/TESTING.md`。
