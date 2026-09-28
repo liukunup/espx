@@ -12,12 +12,14 @@ set(espx_sources
     "utils/nvs_utils.c"
 
     # Core services
-    "core/device_type.c"
-    "core/event_bus.c"
-    "core/device_manager.c"
     "core/sys_stats.c"
     "core/sys_info.c"
     "core/defaults.c"
+
+    # Device model
+    "device/device_type.c"
+    "device/device_manager.c"
+    "device/event_bus.c"
 
     # Configuration
     "config/node_config.c"
@@ -70,6 +72,7 @@ set(espx_include_dirs
     "."
     "utils"
     "config"
+    "device"
     "core"
     "peripherals"
     "mqtt_client"
