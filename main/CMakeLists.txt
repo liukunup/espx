@@ -17,9 +17,6 @@ set(espx_sources
     "core/sys_info.c"
     "core/defaults.c"
 
-    # Serial AT interface
-    "at_service/at_service.c"
-
     # IP-dependent services
     "net_services/net_services.c"
     "net_services/time_sync.c"
@@ -74,7 +71,6 @@ set(espx_include_dirs
     "mfg_provision"
     "ota_service"
     "net_services"
-    "at_service"
 )
 
 idf_component_register(

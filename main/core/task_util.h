@@ -22,7 +22,6 @@
  *
  *   MUST stay on internal RAM (touches flash via NVS or the OTA partition):
  *     ota_service   esp_ota_write()
- *     at_service    AT+CFG -> config_apply -> NVS
  *     ws_server     a config push over the socket -> NVS
  *     test_mode     writes the NVS test-mode request flag
  *     wifi_status   starts mDNS, which persists its hostname to NVS

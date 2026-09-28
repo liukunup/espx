@@ -33,7 +33,6 @@
 #include "net_services/net_services.h"
 #include "core/sys_stats.h"
 #include "core/defaults.h"
-#include "at_service/at_service.h"
 
 static const char *TAG = "app_main";
 
@@ -86,16 +85,7 @@ void app_main(void)
      * to reach test mode. */
     test_mode_start_longpress_watchdog();
 
-    /* ---- 3. Serial AT interface ----------------------------------------- */
-    /* Started before the network so a host MCU can talk to the node even while
-     * it is still unprovisioned. */
-#ifdef CONFIG_ESPX_AT_ENABLE
-    if (at_service_start() != ESP_OK) {
-        ESP_LOGW(TAG, "AT service failed to start");
-    }
-#endif
-
-    /* ---- 4. Configuration ---------------------------------------------- */
+    /* ---- 3. Configuration ---------------------------------------------- */
     ESP_LOGI(TAG, "Initializing configuration...");
     ESP_ERROR_CHECK(node_config_init());
     ESP_ERROR_CHECK(node_config_load());
