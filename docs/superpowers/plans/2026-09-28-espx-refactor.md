@@ -251,11 +251,20 @@ Expected: `gen_cert.py OK`
 
 - [ ] **Step 4: 断言无 AT 残留**
 
+注意：Step 2 的 docstring 故意包含字面量 `AT+ID?` 来解释该探测为何被移除，
+因此这里只能断言**可执行**的 AT 用法与 `at_test` 引用已消失，不能用宽泛的 `AT+ID` 子串。
+
 ```bash
-grep -rn "AT+ID\|at_test" tools/*.py tools/*.sh 2>/dev/null
+cd /Users/liukunup/Documents/repo/GitHub/espx
+# 1) 不得再有 at_test 引用
+grep -rn "at_test" tools/*.py tools/*.sh 2>/dev/null || echo "no at_test refs OK"
+# 2) 不得再有可执行的 AT 命令写入（排除新增的解释性 docstring）
+grep -rn "AT+[A-Z]\(\\|'\)" tools/*.py 2>/dev/null || echo "no executable AT usage OK"
+# 3) 确认被替换的函数体已不是原实现
+grep -n "serial.Serial" tools/gen_cert.py || echo "serial.Serial gone OK"
 ```
 
-Expected: 无输出。
+Expected: 三条均输出对应的 `OK`（前两条对 docstring 行不匹配）。
 
 - [ ] **Step 5: Commit**
 
@@ -289,7 +298,7 @@ git commit -m "chore(tools): drop AT test harness, disable AT device-id probe"
    - 导出配置：`AT+CFG?` → `curl -k https://<ip>/api/config`
    - 下发配置：`AT+CFG=<yaml>` → `curl -k -X POST --data-binary @cfg.yaml https://<ip>/api/config`
    - 设备列表：`AT+DEV?` → `curl -k https://<ip>/api/peripherals`
-   - 写设备：`AT+DEV="relay_a",true` → `curl -k -X POST -d '{"value":true}' https://<ip>/api/peripherals/relay_a/write`
+   - 写设备：`AT+DEV="relay_a",true` → `curl -k -X POST -d 'true' https://<ip>/api/peripherals/relay_a/write`（请求体**就是**值本身，没有 `value` 包装层；继电器驱动接受裸 bool `true` 或 `{"state":true}`，见 `main/peripherals/relay.c:83-99`）
    - 重启：`AT+RST` → `curl -k -X POST https://<ip>/api/system/reboot`
    - 版本：`AT+GMR` → `curl -k https://<ip>/api/node`
    - 进入产线自检：`AT+TESTMODE` → `curl -k -X POST https://<ip>/api/system/testmode`
@@ -2588,7 +2597,7 @@ Expected: 输出按此顺序——`/api/peripherals`（GET）、`/api/peripheral
 curl -k https://<ip>/api/peripherals
 curl -k -X POST https://<ip>/api/peripherals/reload
 curl -k https://<ip>/api/peripherals/relay_a
-curl -k -X POST -d '{"value":true}' https://<ip>/api/peripherals/relay_a/write
+curl -k -X POST -d 'true' https://<ip>/api/peripherals/relay_a/write
 curl -k https://<ip>/api/peripheral/options
 ```
 
