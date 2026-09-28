@@ -17,6 +17,9 @@
 #include "app_info.h"
 #include "node_config.h"
 #include "event_bus.h"
+#include "nvs_utils.h"
+#include "json_utils.h"
+#include "str_utils.h"
 
 static const char *TAG = "node_config";
 
@@ -45,49 +48,32 @@ esp_err_t node_config_init(void)
 
 esp_err_t node_config_load(void)
 {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        return ESP_OK;
-    }
-
-    size_t len = 0;
-    err = nvs_get_str(nvs, NVS_KEY_CONFIG, NULL, &len);
-    if (err != ESP_OK || len == 0) {
-        nvs_close(nvs);
-        return ESP_OK;
-    }
-
-    char *json_str = malloc(len);
-    if (json_str == NULL) {
-        nvs_close(nvs);
-        return ESP_ERR_NO_MEM;
-    }
-
-    err = nvs_get_str(nvs, NVS_KEY_CONFIG, json_str, &len);
-    nvs_close(nvs);
-    if (err != ESP_OK) {
-        free(json_str);
-        return err;
-    }
-
     if (g_config != NULL) {
         cJSON_Delete(g_config);
+        g_config = NULL;
     }
-    g_config = cJSON_Parse(json_str);
-    free(json_str);
+
+    /* A missing namespace/key just means "never configured": not an error. */
+    esp_err_t err = nvs_load_json(NVS_NAMESPACE, NVS_KEY_CONFIG, &g_config);
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* Corrupt stored document: fall back to defaults rather than abort. */
+        ESP_LOGW(TAG, "stored node config is not valid JSON, using defaults");
+    } else if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "failed to load node config: %s", esp_err_to_name(err));
+        return ESP_OK;
+    }
 
     if (g_config != NULL) {
         cJSON *node = cJSON_GetObjectItem(g_config, "node");
         if (cJSON_IsObject(node)) {
-            cJSON *id = cJSON_GetObjectItem(node, "device_id");
-            cJSON *name = cJSON_GetObjectItem(node, "name");
+            const char *id = json_get_string(node, "device_id", NULL);
+            const char *name = json_get_string(node, "name", NULL);
 
-            if (cJSON_IsString(id)) {
-                strncpy(g_device_id, id->valuestring, sizeof(g_device_id) - 1);
+            if (id != NULL) {
+                str_copy(g_device_id, sizeof(g_device_id), id);
             }
-            if (cJSON_IsString(name)) {
-                strncpy(g_name, name->valuestring, sizeof(g_name) - 1);
+            if (name != NULL) {
+                str_copy(g_name, sizeof(g_name), name);
             }
         }
     }
@@ -110,28 +96,8 @@ esp_err_t node_config_save(void)
     cJSON_ReplaceItemInObject(node, "name", cJSON_CreateString(g_name));
     cJSON_ReplaceItemInObject(node, "fw_version", cJSON_CreateString(app_version()));
 
-    char *json_str = cJSON_PrintUnformatted(g_config);
-    if (json_str == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "nvs_open failed: %s", esp_err_to_name(err));
-        free(json_str);
-        return err;
-    }
-
-    size_t len = strlen(json_str);
-    err = nvs_set_str(nvs, NVS_KEY_CONFIG, json_str);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    free(json_str);
-
-    ESP_LOGI(TAG, "node_config_save: result=%s, len=%u", esp_err_to_name(err), (unsigned)len);
+    esp_err_t err = nvs_save_json(NVS_NAMESPACE, NVS_KEY_CONFIG, g_config);
+    ESP_LOGI(TAG, "node_config_save: result=%s", esp_err_to_name(err));
     return err;
 }
 
@@ -165,14 +131,14 @@ esp_err_t node_config_set(const cJSON *config)
 
     cJSON *node = cJSON_GetObjectItem(g_config, "node");
     if (cJSON_IsObject(node)) {
-        cJSON *id = cJSON_GetObjectItem(node, "device_id");
-        cJSON *name = cJSON_GetObjectItem(node, "name");
+        const char *id = json_get_string(node, "device_id", NULL);
+        const char *name = json_get_string(node, "name", NULL);
 
-        if (cJSON_IsString(id)) {
-            strncpy(g_device_id, id->valuestring, sizeof(g_device_id) - 1);
+        if (id != NULL) {
+            str_copy(g_device_id, sizeof(g_device_id), id);
         }
-        if (cJSON_IsString(name)) {
-            strncpy(g_name, name->valuestring, sizeof(g_name) - 1);
+        if (name != NULL) {
+            str_copy(g_name, sizeof(g_name), name);
         }
     }
 

@@ -19,6 +19,8 @@
 #include "device_type.h"
 #include "event_bus.h"
 #include "node_config.h"
+#include "nvs_utils.h"
+#include "str_utils.h"
 
 static const char *TAG = "device_manager";
 
@@ -135,38 +137,15 @@ esp_err_t device_manager_init(void)
 
 esp_err_t device_manager_load(void)
 {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGI(TAG, "No saved device config");
-        return ESP_OK;
-    }
-
-    size_t len = 0;
-    err = nvs_get_str(nvs, NVS_KEY_CONFIG, NULL, &len);
-    if (err != ESP_OK || len == 0) {
-        nvs_close(nvs);
+    cJSON *root = NULL;
+    esp_err_t err = nvs_load_json(NVS_NAMESPACE, NVS_KEY_CONFIG, &root);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGI(TAG, "No devices to load");
         return ESP_OK;
     }
-
-    char *json_str = malloc(len);
-    if (json_str == NULL) {
-        nvs_close(nvs);
-        return ESP_ERR_NO_MEM;
-    }
-
-    err = nvs_get_str(nvs, NVS_KEY_CONFIG, json_str, &len);
-    nvs_close(nvs);
     if (err != ESP_OK) {
-        free(json_str);
-        return err;
-    }
-
-    cJSON *root = cJSON_Parse(json_str);
-    free(json_str);
-    if (root == NULL) {
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "Failed to load devices: %s", esp_err_to_name(err));
+        return ESP_OK;
     }
 
     /* Restoring actuator state below calls device_write(), which makes drivers
@@ -251,33 +230,11 @@ esp_err_t device_manager_save(void)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddItemToObject(root, "devices", array);
 
-    char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-
-    if (json_str == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    ESP_LOGI(TAG, "Saving peripherals to NVS: %s", json_str);
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        free(json_str);
-        return err;
-    }
-
-    err = nvs_set_str(nvs, NVS_KEY_CONFIG, json_str);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    free(json_str);
-
+    esp_err_t err = nvs_save_json(NVS_NAMESPACE, NVS_KEY_CONFIG, root);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Saved %u peripheral(s) to NVS", (unsigned)g_device_count);
-    } else {
-        ESP_LOGE(TAG, "Failed to save peripherals to NVS: %s", esp_err_to_name(err));
     }
+    cJSON_Delete(root);
     return err;
 }
 
@@ -339,7 +296,7 @@ esp_err_t device_add(const char *id, const char *type_name, const cJSON *config)
         return ESP_ERR_NO_MEM;
     }
 
-    strncpy(dev->id, id, sizeof(dev->id) - 1);
+    str_copy(dev->id, sizeof(dev->id), id);
     dev->type = type;
     dev->enabled = true;
     dev->config = config ? cJSON_Duplicate(config, true) : NULL;

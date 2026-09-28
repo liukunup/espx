@@ -16,6 +16,8 @@
 #include "device_manager.h"
 #include "device_type.h"
 #include "mqtt_client/espx_mqtt_client.h"
+#include "json_utils.h"
+#include "str_utils.h"
 
 static const char *TAG = "config_apply";
 
@@ -63,7 +65,7 @@ cJSON *config_parse_document(const char *payload, int *err_line)
 
 static bool is_secret(const char *key)
 {
-    return strstr(key, "password") != NULL || strstr(key, "key") != NULL;
+    return str_contains(key, "password") || str_contains(key, "key");
 }
 
 /**
@@ -151,44 +153,44 @@ static bool merge_section(cJSON *target, const char *section,
  */
 static esp_err_t upsert_device(const cJSON *entry, bool *added, char *err, size_t err_len)
 {
-    cJSON *id = cJSON_GetObjectItem(entry, "id");
-    cJSON *type = cJSON_GetObjectItem(entry, "type");
+    const char *id = json_get_string(entry, "id", NULL);
+    const char *type = json_get_string(entry, "type", NULL);
     cJSON *config = cJSON_GetObjectItem(entry, "config");
     cJSON *enabled = cJSON_GetObjectItem(entry, "enabled");
 
-    if (!cJSON_IsString(id) || id->valuestring[0] == '\0') {
+    if (id == NULL || id[0] == '\0') {
         snprintf(err, err_len, "device entry without an id");
         return ESP_ERR_INVALID_ARG;
     }
-    if (!cJSON_IsString(type) || type->valuestring[0] == '\0') {
-        snprintf(err, err_len, "device '%s' without a type", id->valuestring);
+    if (type == NULL || type[0] == '\0') {
+        snprintf(err, err_len, "device '%s' without a type", id);
         return ESP_ERR_INVALID_ARG;
     }
 
-    bool exists = (device_get(id->valuestring) != NULL);
+    bool exists = (device_get(id) != NULL);
 
     if (config != NULL && !cJSON_IsObject(config)) {
-        snprintf(err, err_len, "device '%s' config must be a mapping", id->valuestring);
+        snprintf(err, err_len, "device '%s' config must be a mapping", id);
         return ESP_ERR_INVALID_ARG;
     }
 
     esp_err_t ret;
     if (exists) {
-        ret = device_update_config(id->valuestring, config);
+        ret = device_update_config(id, config);
         if (ret == ESP_OK) *added = false;
     } else {
-        ret = device_add(id->valuestring, type->valuestring, config);
+        ret = device_add(id, type, config);
         if (ret == ESP_OK) *added = true;
     }
 
     if (ret != ESP_OK) {
-        snprintf(err, err_len, "device '%s': %s", id->valuestring, esp_err_to_name(ret));
+        snprintf(err, err_len, "device '%s': %s", id, esp_err_to_name(ret));
         return ret;
     }
 
     /* device_add() always enables; honour an explicit false afterwards */
     if (enabled != NULL && cJSON_IsBool(enabled)) {
-        device_set_enabled(id->valuestring, cJSON_IsTrue(enabled));
+        device_set_enabled(id, cJSON_IsTrue(enabled));
     }
 
     return ESP_OK;
@@ -281,9 +283,9 @@ esp_err_t config_apply(const cJSON *doc, config_apply_result_t *result)
         if (cJSON_IsArray(devices)) {
             cJSON *entry = NULL;
             cJSON_ArrayForEach(entry, devices) {
-                cJSON *id = cJSON_GetObjectItem(entry, "id");
-                if (cJSON_IsString(id) && keep_n < sizeof(keep) / sizeof(keep[0])) {
-                    keep[keep_n++] = id->valuestring;
+                const char *id = json_get_string(entry, "id", NULL);
+                if (id != NULL && keep_n < sizeof(keep) / sizeof(keep[0])) {
+                    keep[keep_n++] = id;
                 }
             }
         }
@@ -300,8 +302,7 @@ esp_err_t config_apply(const cJSON *doc, config_apply_result_t *result)
             if (listed) continue;
 
             char id[sizeof(dev->id)];
-            strncpy(id, dev->id, sizeof(id) - 1);
-            id[sizeof(id) - 1] = '\0';
+            str_copy(id, sizeof(id), dev->id);
 
             if (device_remove(id) == ESP_OK) {
                 result->devices_removed++;
