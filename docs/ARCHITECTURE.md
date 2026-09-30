@@ -275,20 +275,35 @@ Uses the [espressif/esp-now](https://components.espressif.com/components/espress
 | **Packet Forwarding** | Enable mesh-like relay capabilities |
 | **Security** | AES-128-CCM encryption (optional) |
 | **Payload** | Up to 230 bytes (encrypted: 218 bytes) |
+| **Auto Discovery** | Devices auto-announce every 30s, auto-pair |
 
 #### 4.4.3 REST API
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/esp_now` | Get ESP-NOW status, peers, groups |
-| POST | `/api/esp_now` | Configure ESP-NOW, add/remove peers |
+| POST | `/api/esp_now` | Configure ESP-NOW, actions |
+
+**Actions:**
+| Action | Description |
+|--------|-------------|
+| `discover` | Trigger manual discovery scan |
+| `pair` | Pair with discovered device |
+| `ota_init` | Initialize OTA responder |
+| `ota_scan` | Scan for OTA responders |
+| `ota_send` | Send firmware to target |
+| `prov_start` | Start provisioning responder |
+| `prov_stop` | Stop provisioning |
+
 
 #### 4.4.4 Web UI
 
 The ESP-NOW tab in the web interface provides:
 - Real-time status display (Active/Inactive, MAC, version, security)
+- Discovered devices with one-click pair
 - Peer management (add/remove peers with MAC and optional ID)
 - Group management (add/remove multicast groups)
+- OTA and Provisioning controls
 - One-click refresh
 
 #### 4.4.5 Configuration Format
@@ -301,42 +316,61 @@ POST /api/esp_now
 // Remove peer
 POST /api/esp_now
 {"peers": [{"mac": "AA:BB:CC:DD:EE:FF", "_action": "remove"}]}
-// Add groups
-POST /api/esp_now
-{"groups": [{"name": "sensors", "id": "01:02:03:04:05:06"}]}
-// Remove group
-POST /api/esp_now
-{"groups": [{"id": "01:02:03:04:05:06", "_action": "remove"}]}
+
+
+// OTA: Initialize responder
+{"action": "ota_init", "skip_version_check": false, "progress_interval": 10}
+
+
+// OTA: Scan for responders
+{"action": "ota_scan", "timeout_ms": 30000}
+
+
+// Provisioning: Start responder
+{"action": "prov_start", "ssid": "MyWiFi", "password": "secret", "duration_s": 30}
 ```
 
 #### 4.4.6 Source
 
 ```
 main/net_services/
-└── esp_now_service.{c,h}    ESP-NOW service implementation
+└── esp_now_service.{c,h}    ESP-NOW service (wraps esp-now component)
 ```
 
-#### 4.4.7 ESP-NOW OTA
+#### 4.4.7 ESP-NOW OTA (via espnow_ota)
 
-Firmware can be transmitted over ESP-NOW without Wi-Fi connectivity.
 
-| Message | Purpose |
-|---------|---------|
-| `OTA_START` | Announce firmware metadata (size, chunks, version) |
-| `OTA_DATA` | Transmit firmware chunks (200 bytes each) |
-| `OTA_END` | Signal transfer completion |
-| `OTA_STATUS` | Report success/failure |
-| `OTA_REQUEST` | Request firmware from peer |
+Uses espressif/esp-now component's built-in OTA functionality.
 
-#### 4.4.8 ESP-NOW Provisioning
+Initiator downloads firmware from HTTP server, then sends over ESP-NOW to responders.
 
-New devices can be configured over ESP-NOW without screen/keyboard.
 
-| Message | Purpose |
-|---------|---------|
-| `PROV_REQUEST` | New device broadcasts provisioning request |
-| `PROV_RESPONSE` | Provisioner sends Wi-Fi credentials |
-| `PROV_STATUS` | Device reports connection result |
+| Phase | Description |
+|-------|-------------|
+| **Responder** | Connect to WiFi, start OTA task, receive and write firmware |
+| **Initiator** | Download firmware from HTTP, scan responders, send via ESP-NOW |
+
+**API:**
+- `espnow_ota_responder_start()` - Start OTA responder
+- `espnow_ota_initiator_scan()` - Scan for responders
+- `espnow_ota_initiator_send()` - Send firmware to targets
+
+#### 4.4.8 ESP-NOW Provisioning (via espnow_prov)
+
+
+Uses espressif/esp-now component's built-in provisioning functionality.
+Responder broadcasts beacons, initiator requests and receives WiFi credentials.
+
+
+| Phase | Description |
+|-------|-------------|
+| **Responder** | Broadcast provision beacons, send WiFi credentials |
+| **Initiator** | Scan for beacons, request credentials, connect to WiFi |
+
+**API:**
+- `espnow_prov_responder_start()` - Start as provisioner (broadcast beacons)
+- `espnow_prov_initiator_scan()` - Scan for provisioners
+- `espnow_prov_initiator_send()` - Request and receive credentials
 
 ### 4.5 Serial test console
 

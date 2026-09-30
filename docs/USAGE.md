@@ -528,7 +528,18 @@ curl -k -X POST https://$HOST/api/esp_now \
 | `forward` | bool | 启用数据包转发（mesh 特性）|
 | `peers` | array | 对等设备列表 |
 | `groups` | array | 组播组列表 |
-| `action` | string | 特殊操作：`discover`、`pair`、`prov_start`、`prov_send`、`prov_request` |
+| `action` | string | 特殊操作 |
+
+**Action 操作：**
+| Action | 说明 |
+|--------|------|
+| `discover` | 触发手动发现 |
+| `pair` | 与发现设备配对 |
+| `ota_init` | 初始化 OTA 响应者 |
+| `ota_scan` | 扫描可升级设备 |
+| `ota_send` | 发送固件到目标 |
+| `prov_start` | 开始配网（广播信标）|
+| `prov_stop` | 停止配网 |
 
 ### 7.11 特性
 
@@ -545,8 +556,8 @@ curl -k -X POST https://$HOST/api/esp_now \
 
 ### 7.12 使用场景
 
+**场景 1: 多设备同步控制**
 ```
-场景 1: 多设备同步控制
 ┌─────────┐         ┌─────────┐
 │ ESPX-1  │─────────│ ESPX-2  │
 │ Relay1  │◄────────│ Relay2  │
@@ -556,6 +567,38 @@ curl -k -X POST https://$HOST/api/esp_now \
               │
         ┌─────────┐
         │  Broker │
+        └─────────┘
+```
+
+**场景 2: OTA 批量升级**
+```
+┌─────────┐  HTTP 下载   ┌─────────┐
+│ ESPX-1  │◄───────────│ Server  │
+│(Initiator)│         └─────────┘
+└─────────┘
+    │
+    │  ESP-NOW OTA
+    ▼
+┌─────────┐ ┌─────────┐ ┌─────────┐
+│ ESPX-2  │ │ ESPX-3  │ │ ESPX-4  │
+│(Responder│ │(Responder│ │(Responder│
+└─────────┘ └─────────┘ └─────────┘
+```
+
+**场景 3: 新设备配网**
+```
+n┌─────────┐ 广播信标   ┌─────────┐
+│ ESPX-1  │◄──────────│ 手机/PC  │
+│(Responder)│  用户选择   │
+└─────────┘ WiFi 凭证  └─────────┘
+    ▲
+    │
+┌─────────┐
+│ ESPX-2  │  连接 WiFi
+│(Initiator)│
+│ (新设备) │
+└─────────┘
+```
         └─────────┘
 
 场景 2: 传感器数据收集
