@@ -2,12 +2,14 @@
  * @file esp_now_service.h
  * @brief ESP-NOW peer-to-peer communication service
  *
- * Uses espressif/esp-now component for advanced features:
+ * Uses espressif/esp-now component (v2.5.3) for:
+ * - Peer discovery and management
  * - ACK and retransmission
  * - Forwarding and mesh-like capabilities
  * - Groups support
  * - Security encryption
- * - Multiple data types
+ * - OTA updates (via espnow_ota)
+ * - Provisioning (via espnow_prov)
  */
 
 #ifndef ESP_NOW_SERVICE_H
@@ -17,6 +19,9 @@
 #include <stdbool.h>
 #include <esp_err.h>
 #include <cJSON.h>
+#include <espnow.h>
+#include <espnow_ota.h>
+#include <espnow_prov.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,17 +33,13 @@ extern "C" {
 /** Maximum number of groups */
 #define ESPX_ESPNOW_MAX_GROUPS 10
 
-/** Maximum number of discovered (unpaired) devices */
+/** Maximum number of discovered devices */
 #define ESPX_ESPNOW_MAX_DISCOVERED 20
-
-/** Discovery message types */
-#define ESPX_ESPNOW_DISCOVER_MSG       0x01
-#define ESPX_ESPNOW_ANNOUNCE_MSG       0x02
 
 /** Discovery broadcast interval (30 seconds) */
 #define ESPX_ESPNOW_ANNOUNCE_INTERVAL_MS  30000
 
-/** Peer info (for paired peers) */
+/** Peer info */
 typedef struct {
     char id[32];              /**< Peer identifier */
     uint8_t mac[6];          /**< MAC address */
@@ -47,7 +48,7 @@ typedef struct {
     int8_t rssi;             /**< Last RSSI */
 } espx_espnow_peer_info_t;
 
-/** Discovered device info (unpaired) */
+/** Discovered device info */
 typedef struct {
     uint8_t mac[6];          /**< MAC address */
     char device_id[32];       /**< Device ID */
@@ -58,7 +59,7 @@ typedef struct {
     bool pending_pair;        /**< Waiting for user confirmation */
 } espx_espnow_discovered_t;
 
-/** ESP-NOW group info */
+/** Group info */
 typedef struct {
     uint8_t id[6];           /**< Group ID */
     char name[32];           /**< Group name (optional) */
@@ -72,113 +73,16 @@ typedef enum {
     ESPX_ESPNOW_TYPE_STATE,         /**< State report */
     ESPX_ESPNOW_TYPE_DISCOVER,      /**< Discovery message */
     ESPX_ESPNOW_TYPE_ANNOUNCE,      /**< Announcement/broadcast */
-    ESPX_ESPNOW_TYPE_OTA,          /**< OTA update message */
     ESPX_ESPNOW_TYPE_MAX
 } espx_espnow_data_type_t;
 
-/** ESP-NOW OTA message types */
-#define ESPX_ESPNOW_OTA_START       0x01
-#define ESPX_ESPNOW_OTA_DATA        0x02
-#define ESPX_ESPNOW_OTA_END         0x03
-#define ESPX_ESPNOW_OTA_STATUS      0x04
-#define ESPX_ESPNOW_OTA_REQUEST     0x05
+/** Discovery message types */
+#define ESPX_ESPNOW_DISCOVER_MSG       0x01
+#define ESPX_ESPNOW_ANNOUNCE_MSG      0x02
 
-/** OTA chunk size (max payload per ESP-NOW frame) */
-#define ESPX_ESPNOW_OTA_CHUNK_SIZE  200
-
-/** OTA state */
-typedef enum {
-    ESPX_OTA_STATE_IDLE = 0,
-    ESPX_OTA_STATE_RECEIVING,
-    ESPX_OTA_STATE_VALIDATING,
-    ESPX_OTA_STATE_APPLYING,
-    ESPX_OTA_STATE_SUCCESS,
-    ESPX_OTA_STATE_FAILED
-} espx_ota_state_t;
-
-/* ========== ESP-NOW Provisioning ========== */
-
-/** Provisioning message types */
-#define ESPX_ESPNOW_PROV_REQUEST    0x20
-#define ESPX_ESPNOW_PROV_RESPONSE   0x21
-#define ESPX_ESPNOW_PROV_STATUS     0x22
-
-/** Provisioning state */
-typedef enum {
-    ESPX_PROV_STATE_IDLE = 0,
-    ESPX_PROV_STATE_WAITING_CREDENTIALS,
-    ESPX_PROV_STATE_CONNECTING,
-    ESPX_PROV_STATE_CONNECTED,
-    ESPX_PROV_STATE_FAILED
-} espx_prov_state_t;
-
-/** Provisioning callback */
-typedef void (*espx_prov_request_cb_t)(const uint8_t *mac, const char *device_id,
-                                        const char *name, int8_t rssi);
-typedef void (*espx_prov_complete_cb_t)(bool success, const char *ssid,
-                                         const char *ip, const char *error);
-
-/**
- * @brief Register callback for provisioning requests
- *
- * Called when a new device requests provisioning.
- */
-void espx_espnow_prov_set_request_callback(espx_prov_request_cb_t callback);
-
-/**
- * @brief Register callback for provisioning completion
- */
-void espx_espnow_prov_set_complete_callback(espx_prov_complete_cb_t callback);
-
-/**
- * @brief Send provisioning response to a device
- *
- * @param device_mac Target device MAC address
- * @param ssid Wi-Fi SSID
- * @param password Wi-Fi password (can be NULL for open networks)
- * @return ESP_OK on success
- */
-esp_err_t espx_espnow_prov_send_credentials(const uint8_t *device_mac,
-                                              const char *ssid, const char *password);
-
-/**
- * @brief Check if provisioning is in progress
- */
-bool espx_espnow_prov_is_active(void);
-
-/**
- * @brief Get current provisioning state
- */
-espx_prov_state_t espx_espnow_prov_get_state(void);
-
-/**
- * @brief Send provisioning request (for new devices)
- *
- * Called by a new device that hasn't been configured yet.
- */
-esp_err_t espx_espnow_prov_request(void);
-
-/**
- * @brief Start listening for provisioning requests (for provisioner)
- *
- * @return ESP_OK on success
- */
-esp_err_t espx_espnow_prov_start_listener(void);
-
-/**
- * @brief Stop provisioning listener
- */
-void espx_espnow_prov_stop_listener(void);
-
-/** Message structure (packed) */
-typedef struct __attribute__((packed)) {
-    uint16_t magic;                  /**< Unique identifier for deduplication */
-    uint8_t type;                    /**< Message type */
-    uint8_t ttl;                     /**< Time to live */
-    uint8_t src_mac[6];              /**< Source MAC */
-    uint8_t seq;                     /**< Sequence number */
-    uint8_t payload[];               /**< Variable length payload */
-} espx_espnow_msg_t;
+/** Discovery/Announcement callbacks */
+typedef void (*espx_espnow_peer_discovered_cb_t)(const uint8_t *mac, const char *device_id,
+                                                 const char *name, const char *version, int8_t rssi);
 
 /**
  * @brief Initialize ESP-NOW service
@@ -279,8 +183,6 @@ esp_err_t espx_espnow_send_group(const uint8_t *group_id, espx_espnow_data_type_
 
 /**
  * @brief Get local MAC address
- *
- * @param mac Buffer to store MAC address (6 bytes)
  */
 void espx_espnow_get_local_mac(uint8_t *mac);
 
@@ -322,9 +224,6 @@ void espx_espnow_set_recv_callback(espx_espnow_recv_callback_t callback);
  * @brief Trigger manual discovery scan
  *
  * Broadcasts a DISCOVER message to find nearby devices.
- * Discovered devices will respond with ANNOUNCE.
- *
- * @return ESP_OK on success
  */
 esp_err_t espx_espnow_discover(void);
 
@@ -349,17 +248,12 @@ esp_err_t espx_espnow_pair_discovered(const uint8_t *mac);
 void espx_espnow_clear_discovered(void);
 
 /**
+ * @brief Register callback for peer discovered
+ */
+void espx_espnow_on_peer_discovered(espx_espnow_peer_discovered_cb_t callback);
+
+/**
  * @brief Configure ESP-NOW from JSON
- *
- * Config format:
- * {
- *   "enabled": true,
- *   "pmk": "0123456789abcdef",
- *   "security": true,
- *   "forward": true,
- *   "groups": [{"id": "01:02:03:04:05:06", "name": "lights"}],
- *   "peers": [{"id": "relay1", "mac": "AA:BB:CC:DD:EE:FF", "key": "..."}]
- * }
  */
 esp_err_t espx_espnow_configure(const cJSON *config);
 
@@ -373,76 +267,111 @@ cJSON* espx_espnow_config_export(void);
  */
 const char* espx_espnow_version(void);
 
-/* ========== ESP-NOW OTA ========== */
+/* ========== ESP-NOW OTA (using espnow_ota) ========== */
 
 /**
- * @brief OTA progress callback
- */
-typedef void (*espx_ota_progress_cb_t)(size_t received, size_t total, int percent);
-
-/**
- * @brief OTA complete callback
- */
-typedef void (*espx_ota_complete_cb_t)(bool success, const char *message);
-
-/**
- * @brief Start OTA update to a peer device
+ * @brief Initialize ESP-NOW OTA responder
  *
- * @param peer_mac Target device MAC address
- * @param firmware_data Firmware binary data
- * @param size Firmware size in bytes
- * @param version Firmware version string
- * @param progress_cb Progress callback (can be NULL)
- * @param complete_cb Complete callback (can be NULL)
+ * Starts the OTA responder that waits for firmware upgrades.
+ * This should be called after wifi is connected.
+ *
+ * @param skip_version_check Skip version check
+ * @param progress_interval Progress report interval (percentage)
  * @return ESP_OK on success
  */
-esp_err_t espx_espnow_ota_start(const uint8_t *peer_mac, const uint8_t *firmware_data,
-                                  size_t size, const char *version,
-                                  espx_ota_progress_cb_t progress_cb,
-                                  espx_ota_complete_cb_t complete_cb);
+esp_err_t espx_espnow_ota_init(bool skip_version_check, uint8_t progress_interval);
 
 /**
- * @brief Request OTA from a peer device
+ * @brief Scan for devices with firmware to upgrade
  *
- * Sends OTA request to peer, which will respond with firmware data.
- *
- * @param peer_mac Target device MAC address
- * @param current_version Current firmware version
- * @param progress_cb Progress callback (can be NULL)
- * @param complete_cb Complete callback (can be NULL)
+ * @param timeout_ticks Maximum scan time (pdMS_TO_TICKS(30000) for 30s)
+ * @param info_list Output array of discovered responders
+ * @param num Number of responders found
  * @return ESP_OK on success
  */
-esp_err_t espx_espnow_ota_request(const uint8_t *peer_mac, const char *current_version,
-                                    espx_ota_progress_cb_t progress_cb,
-                                    espx_ota_complete_cb_t complete_cb);
+esp_err_t espx_espnow_ota_scan(TickType_t timeout_ticks, espnow_ota_responder_t **info_list, size_t *num);
 
 /**
- * @brief Cancel ongoing OTA
+ * @brief Free scan result memory
+ */
+esp_err_t espx_espnow_ota_scan_result_free(void);
+
+/**
+ * @brief Send OTA to target device
  *
+ * @param addr Target MAC address (6 bytes)
+ * @param size Firmware size
+ * @param data_cb Callback to read firmware from flash
+ * @param result Output result (must be freed with espx_espnow_ota_result_free)
  * @return ESP_OK on success
  */
-esp_err_t espx_espnow_ota_cancel(void);
+esp_err_t espx_espnow_ota_send(const uint8_t *addr, size_t size,
+                                espnow_ota_initiator_data_cb_t data_cb,
+                                espnow_ota_result_t *result);
+
+/**
+ * @brief Stop ongoing OTA
+ */
+esp_err_t espx_espnow_ota_stop(void);
+
+/**
+ * @brief Free OTA result memory
+ */
+esp_err_t espx_espnow_ota_result_free(espnow_ota_result_t *result);
 
 /**
  * @brief Check if OTA is in progress
  */
 bool espx_espnow_ota_is_active(void);
 
-/**
- * @brief Register callback for receiving OTA from peer
- *
- * @param firmware_data Buffer to store received firmware
- * @param max_size Maximum buffer size
- * @param progress_cb Progress callback (can be NULL)
- * @param complete_cb Complete callback (can be NULL)
- */
-typedef void (*espx_ota_receive_cb_t)(const uint8_t *src_mac, const char *version,
-                                        size_t size, size_t received, int percent);
-typedef void (*espx_ota_receive_done_cb_t)(const uint8_t *src_mac, const char *version,
-                                           size_t size, bool success, const char *message);
+/* ========== ESP-NOW Provisioning (using espnow_prov) ========== */
 
-void espx_espnow_ota_set_receive_callback(espx_ota_receive_cb_t progress_cb,
-                                           espx_ota_receive_done_cb_t complete_cb);
+/**
+ * @brief Initialize ESP-NOW provisioning
+ */
+esp_err_t espx_espnow_prov_init(void);
+
+/**
+ * @brief Start provisioning as responder
+ *
+ * Broadcasts provision beacons and sends WiFi credentials to initiators.
+ *
+ * @param product_id Product identifier
+ * @param device_name Device name
+ * @param ssid WiFi SSID to send
+ * @param password WiFi password (can be NULL for open networks)
+ * @param beacon_duration_s Beacon broadcast duration in seconds
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_prov_start_responder(const char *product_id, const char *device_name,
+                                             const char *ssid, const char *password,
+                                             uint32_t beacon_duration_s);
+
+/**
+ * @brief Start provisioning as initiator
+ *
+ * Scans for responder beacons and requests WiFi credentials.
+ *
+ * @param product_id Product ID to scan for
+ * @param device_name Device name
+ * @param auth_mode Authentication mode (ESPNOW_PROV_AUTH_*)
+ * @param secret Authentication secret
+ * @param timeout_ticks Maximum scan time in ticks
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_prov_start_initiator(const char *product_id, const char *device_name,
+                                              uint8_t auth_mode, const char *secret,
+                                              TickType_t timeout_ticks);
+
+/**
+ * @brief Stop provisioning
+ */
+void espx_espnow_prov_stop(void);
+
+/**
+ * @brief Check if provisioning is active
+ */
+bool espx_espnow_prov_is_active(void);
 
 #ifdef __cplusplus
 }

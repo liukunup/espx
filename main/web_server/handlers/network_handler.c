@@ -125,39 +125,83 @@ static esp_err_t api_esp_now_handler(httpd_req_t *req)
                     err = ESP_ERR_INVALID_ARG;
                     cJSON_AddStringToObject(resp, "error", "Missing MAC address");
                 }
-            } else if (strcmp(action->valuestring, "prov_start") == 0) {
-                /* Start provisioning listener */
-                err = espx_espnow_prov_start_listener();
-                cJSON_AddStringToObject(resp, "action", "prov_start");
-            } else if (strcmp(action->valuestring, "prov_stop") == 0) {
-                /* Stop provisioning listener */
-                espx_espnow_prov_stop_listener();
-                cJSON_AddStringToObject(resp, "action", "prov_stop");
-            } else if (strcmp(action->valuestring, "prov_send") == 0) {
-                /* Send Wi-Fi credentials to device */
+            } else if (strcmp(action->valuestring, "ota_scan") == 0) {
+                /* Scan for OTA responders */
+                cJSON *timeout_json = cJSON_GetObjectItem(config, "timeout_ms");
+                uint32_t timeout_ms = timeout_json ? cJSON_GetNumberValue(timeout_json) : 30000;
+                
+                espnow_ota_responder_t *info_list = NULL;
+                size_t num = 0;
+                err = espx_espnow_ota_scan(pdMS_TO_TICKS(timeout_ms), &info_list, &num);
+                
+                cJSON_AddStringToObject(resp, "action", "ota_scan");
+                cJSON_AddNumberToObject(resp, "found", num);
+                
+                if (num > 0) {
+                    cJSON *devices = cJSON_CreateArray();
+                    for (size_t i = 0; i < num; i++) {
+                        cJSON *dev = cJSON_CreateObject();
+                        char mac_str[32];
+                        mac_to_str(info_list[i].mac, mac_str, sizeof(mac_str));
+                        cJSON_AddStringToObject(dev, "mac", mac_str);
+                        cJSON_AddNumberToObject(dev, "rssi", info_list[i].rssi);
+                        cJSON_AddNumberToObject(dev, "channel", info_list[i].channel);
+                        cJSON_AddStringToObject(dev, "version", info_list[i].app_desc.version);
+                        cJSON_AddItemToArray(devices, dev);
+                    }
+                    cJSON_AddItemToObject(resp, "devices", devices);
+                    espx_espnow_ota_scan_result_free();
+                }
+            } else if (strcmp(action->valuestring, "ota_send") == 0) {
+                /* Send OTA to target */
                 cJSON *mac_json = cJSON_GetObjectItem(config, "mac");
-                cJSON *ssid_json = cJSON_GetObjectItem(config, "ssid");
-                cJSON *pass_json = cJSON_GetObjectItem(config, "password");
-                if (cJSON_IsString(mac_json) && cJSON_IsString(ssid_json)) {
+                if (cJSON_IsString(mac_json)) {
                     uint8_t mac[6];
                     if (sscanf(mac_json->valuestring, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
                                &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
-                        err = espx_espnow_prov_send_credentials(mac, ssid_json->valuestring,
-                            cJSON_IsString(pass_json) ? pass_json->valuestring : NULL);
-                        cJSON_AddStringToObject(resp, "action", "prov_send");
-                        cJSON_AddStringToObject(resp, "mac", mac_json->valuestring);
+                        /* TODO: Implement OTA send with HTTP URL or local firmware */
+                        cJSON_AddStringToObject(resp, "action", "ota_send");
+                        cJSON_AddStringToObject(resp, "status", "not_implemented");
+                        cJSON_AddStringToObject(resp, "hint", "Use espnow_ota_initiator_send() with HTTP firmware");
                     } else {
                         err = ESP_ERR_INVALID_ARG;
                         cJSON_AddStringToObject(resp, "error", "Invalid MAC format");
                     }
                 } else {
                     err = ESP_ERR_INVALID_ARG;
-                    cJSON_AddStringToObject(resp, "error", "Missing MAC or SSID");
+                    cJSON_AddStringToObject(resp, "error", "Missing MAC address");
                 }
-            } else if (strcmp(action->valuestring, "prov_request") == 0) {
-                /* Request provisioning (for new device) */
-                err = espx_espnow_prov_request();
-                cJSON_AddStringToObject(resp, "action", "prov_request");
+            } else if (strcmp(action->valuestring, "ota_init") == 0) {
+                /* Initialize OTA responder */
+                cJSON *skip_check = cJSON_GetObjectItem(config, "skip_version_check");
+                cJSON *interval = cJSON_GetObjectItem(config, "progress_interval");
+                err = espx_espnow_ota_init(
+                    skip_check ? cJSON_IsTrue(skip_check) : false,
+                    interval ? (uint8_t)cJSON_GetNumberValue(interval) : 10
+                );
+                cJSON_AddStringToObject(resp, "action", "ota_init");
+            } else if (strcmp(action->valuestring, "prov_start") == 0) {
+                /* Start provisioning responder */
+                cJSON *ssid_json = cJSON_GetObjectItem(config, "ssid");
+                cJSON *pass_json = cJSON_GetObjectItem(config, "password");
+                cJSON *duration_json = cJSON_GetObjectItem(config, "duration_s");
+                
+                if (cJSON_IsString(ssid_json)) {
+                    uint32_t duration = duration_json ? (uint32_t)cJSON_GetNumberValue(duration_json) : 30;
+                    err = espx_espnow_prov_start_responder(
+                        "espx", "ESPX-Provisioner",
+                        ssid_json->valuestring,
+                        cJSON_IsString(pass_json) ? pass_json->valuestring : NULL,
+                        duration
+                    );
+                    cJSON_AddStringToObject(resp, "action", "prov_start");
+                } else {
+                    err = ESP_ERR_INVALID_ARG;
+                    cJSON_AddStringToObject(resp, "error", "Missing SSID");
+                }
+            } else if (strcmp(action->valuestring, "prov_stop") == 0) {
+                espx_espnow_prov_stop();
+                cJSON_AddStringToObject(resp, "action", "prov_stop");
             } else {
                 err = ESP_ERR_INVALID_ARG;
                 cJSON_AddStringToObject(resp, "error", "Unknown action");
