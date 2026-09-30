@@ -72,8 +72,103 @@ typedef enum {
     ESPX_ESPNOW_TYPE_STATE,         /**< State report */
     ESPX_ESPNOW_TYPE_DISCOVER,      /**< Discovery message */
     ESPX_ESPNOW_TYPE_ANNOUNCE,      /**< Announcement/broadcast */
+    ESPX_ESPNOW_TYPE_OTA,          /**< OTA update message */
     ESPX_ESPNOW_TYPE_MAX
 } espx_espnow_data_type_t;
+
+/** ESP-NOW OTA message types */
+#define ESPX_ESPNOW_OTA_START       0x01
+#define ESPX_ESPNOW_OTA_DATA        0x02
+#define ESPX_ESPNOW_OTA_END         0x03
+#define ESPX_ESPNOW_OTA_STATUS      0x04
+#define ESPX_ESPNOW_OTA_REQUEST     0x05
+
+/** OTA chunk size (max payload per ESP-NOW frame) */
+#define ESPX_ESPNOW_OTA_CHUNK_SIZE  200
+
+/** OTA state */
+typedef enum {
+    ESPX_OTA_STATE_IDLE = 0,
+    ESPX_OTA_STATE_RECEIVING,
+    ESPX_OTA_STATE_VALIDATING,
+    ESPX_OTA_STATE_APPLYING,
+    ESPX_OTA_STATE_SUCCESS,
+    ESPX_OTA_STATE_FAILED
+} espx_ota_state_t;
+
+/* ========== ESP-NOW Provisioning ========== */
+
+/** Provisioning message types */
+#define ESPX_ESPNOW_PROV_REQUEST    0x20
+#define ESPX_ESPNOW_PROV_RESPONSE   0x21
+#define ESPX_ESPNOW_PROV_STATUS     0x22
+
+/** Provisioning state */
+typedef enum {
+    ESPX_PROV_STATE_IDLE = 0,
+    ESPX_PROV_STATE_WAITING_CREDENTIALS,
+    ESPX_PROV_STATE_CONNECTING,
+    ESPX_PROV_STATE_CONNECTED,
+    ESPX_PROV_STATE_FAILED
+} espx_prov_state_t;
+
+/** Provisioning callback */
+typedef void (*espx_prov_request_cb_t)(const uint8_t *mac, const char *device_id,
+                                        const char *name, int8_t rssi);
+typedef void (*espx_prov_complete_cb_t)(bool success, const char *ssid,
+                                         const char *ip, const char *error);
+
+/**
+ * @brief Register callback for provisioning requests
+ *
+ * Called when a new device requests provisioning.
+ */
+void espx_espnow_prov_set_request_callback(espx_prov_request_cb_t callback);
+
+/**
+ * @brief Register callback for provisioning completion
+ */
+void espx_espnow_prov_set_complete_callback(espx_prov_complete_cb_t callback);
+
+/**
+ * @brief Send provisioning response to a device
+ *
+ * @param device_mac Target device MAC address
+ * @param ssid Wi-Fi SSID
+ * @param password Wi-Fi password (can be NULL for open networks)
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_prov_send_credentials(const uint8_t *device_mac,
+                                              const char *ssid, const char *password);
+
+/**
+ * @brief Check if provisioning is in progress
+ */
+bool espx_espnow_prov_is_active(void);
+
+/**
+ * @brief Get current provisioning state
+ */
+espx_prov_state_t espx_espnow_prov_get_state(void);
+
+/**
+ * @brief Send provisioning request (for new devices)
+ *
+ * Called by a new device that hasn't been configured yet.
+ */
+esp_err_t espx_espnow_prov_request(void);
+
+/**
+ * @brief Start listening for provisioning requests (for provisioner)
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_prov_start_listener(void);
+
+/**
+ * @brief Stop provisioning listener
+ */
+void espx_espnow_prov_stop_listener(void);
 
 /** Message structure (packed) */
 typedef struct __attribute__((packed)) {
@@ -277,6 +372,77 @@ cJSON* espx_espnow_config_export(void);
  * @brief Get version string
  */
 const char* espx_espnow_version(void);
+
+/* ========== ESP-NOW OTA ========== */
+
+/**
+ * @brief OTA progress callback
+ */
+typedef void (*espx_ota_progress_cb_t)(size_t received, size_t total, int percent);
+
+/**
+ * @brief OTA complete callback
+ */
+typedef void (*espx_ota_complete_cb_t)(bool success, const char *message);
+
+/**
+ * @brief Start OTA update to a peer device
+ *
+ * @param peer_mac Target device MAC address
+ * @param firmware_data Firmware binary data
+ * @param size Firmware size in bytes
+ * @param version Firmware version string
+ * @param progress_cb Progress callback (can be NULL)
+ * @param complete_cb Complete callback (can be NULL)
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_ota_start(const uint8_t *peer_mac, const uint8_t *firmware_data,
+                                  size_t size, const char *version,
+                                  espx_ota_progress_cb_t progress_cb,
+                                  espx_ota_complete_cb_t complete_cb);
+
+/**
+ * @brief Request OTA from a peer device
+ *
+ * Sends OTA request to peer, which will respond with firmware data.
+ *
+ * @param peer_mac Target device MAC address
+ * @param current_version Current firmware version
+ * @param progress_cb Progress callback (can be NULL)
+ * @param complete_cb Complete callback (can be NULL)
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_ota_request(const uint8_t *peer_mac, const char *current_version,
+                                    espx_ota_progress_cb_t progress_cb,
+                                    espx_ota_complete_cb_t complete_cb);
+
+/**
+ * @brief Cancel ongoing OTA
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_ota_cancel(void);
+
+/**
+ * @brief Check if OTA is in progress
+ */
+bool espx_espnow_ota_is_active(void);
+
+/**
+ * @brief Register callback for receiving OTA from peer
+ *
+ * @param firmware_data Buffer to store received firmware
+ * @param max_size Maximum buffer size
+ * @param progress_cb Progress callback (can be NULL)
+ * @param complete_cb Complete callback (can be NULL)
+ */
+typedef void (*espx_ota_receive_cb_t)(const uint8_t *src_mac, const char *version,
+                                        size_t size, size_t received, int percent);
+typedef void (*espx_ota_receive_done_cb_t)(const uint8_t *src_mac, const char *version,
+                                           size_t size, bool success, const char *message);
+
+void espx_espnow_ota_set_receive_callback(espx_ota_receive_cb_t progress_cb,
+                                           espx_ota_receive_done_cb_t complete_cb);
 
 #ifdef __cplusplus
 }

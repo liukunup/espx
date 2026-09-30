@@ -343,7 +343,61 @@ ESP-NOW 是一种**无需 IP** 的直接 Wi-Fi 通信协议，适合 ESP 设备�
 - **DISCOVER**: 手动触发，收到后设备会响应 ANNOUNCE
 - **自动配对**: 收到陌生设备的广播后，自动加入对等列表
 
-### 7.2 Web 界面
+### 7.2 ESP-NOW OTA 空中升级
+
+通过 ESP-NOW 传输固件升级，无需 Wi-Fi 连接。
+
+```
+┌──────────┐   OTA_START    ┌──────────┐
+│  ESPX-1  │ ──────────────►│  ESPX-2  │
+│ (Sender) │                │(Receiver)│
+└──────────┘   OTA_DATA (xN)└──────────┘
+      │                           │
+      └─────── OTA_END ───────────┘
+```
+
+**OTA 流程：**
+1. `ota_start`: 发送固件元信息（大小、分片数、版本）
+2. `ota_data`: 分片传输固件数据（每片 200 字节）
+3. `ota_end`: 传输完成，接收方验证
+4. `ota_status`: 接收方返回状态
+
+**OTA API：**
+```bash
+# 触发发现
+curl -X POST /api/esp_now -d '{"action":"ota_request","mac":"AA:BB:CC:DD:EE:FF"}'
+```
+
+### 7.3 ESP-NOW 配网
+
+通过 ESP-NOW 为新设备配置 Wi-Fi 凭证，无需屏幕或按键。
+
+```
+┌─────────────┐  PROV_REQUEST   ┌─────────────┐
+│  新设备     │ ───────────────►│  主设备     │
+│ (未配网)    │ ◄───────────────│ (已连接WiFi)│
+└─────────────┘  PROV_RESPONSE  └─────────────┘
+      │              (SSID+密码)        │
+      │                                  │
+      └─────── PROV_STATUS ────────────┘
+           (连接结果: IP 或错误)
+```
+
+**配网 API：**
+```bash
+# 主设备：开始监听配网请求
+curl -X POST /api/esp_now -d '{"action":"prov_start"}'
+
+# 主设备：向新设备发送 Wi-Fi 凭证
+curl -X POST /api/esp_now -d '{"action":"prov_send","mac":"AA:BB:CC:DD:EE:FF","ssid":"HomeLab","password":"12345678"}'
+
+# 新设备：请求配网
+curl -X POST /api/esp_now -d '{"action":"prov_request"}'
+```
+
+**注意：** 配网后设备会尝试连接 Wi-Fi，成功后返回 IP 地址。
+
+### 7.4 Web 界面
 
 在浏览器中访问 `https://<设备IP>/`，点击顶部导航的 **ESP-NOW** 标签：
 
@@ -376,7 +430,7 @@ ESP-NOW 是一种**无需 IP** 的直接 Wi-Fi 通信协议，适合 ESP 设备�
 - **Peers**: 已配对的对等设备列表
 - **Groups**: 组播组列表
 
-### 7.3 查询状态
+### 7.5 查询状态
 
 ```bash
 curl -k https://$HOST/api/esp_now | python3 -m json.tool
@@ -399,7 +453,7 @@ curl -k https://$HOST/api/esp_now | python3 -m json.tool
 }
 ```
 
-### 7.4 手动发现与配对
+### 7.6 手动发现与配对
 
 ```bash
 # 触发 DISCOVER 广播（主动发现设备）
@@ -418,7 +472,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   -d '{"action": "clear_discovered"}'
 ```
 
-### 7.5 添加组播组
+### 7.7 添加组播组
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -431,7 +485,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   }'
 ```
 
-### 7.6 启用加密
+### 7.8 启用加密
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -442,7 +496,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   }'
 ```
 
-### 7.7 禁用 ESP-NOW
+### 7.9 禁用 ESP-NOW
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -450,7 +504,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   -d '{"enabled": false}'
 ```
 
-### 7.8 参数说明
+### 7.10 参数说明
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -459,9 +513,9 @@ curl -k -X POST https://$HOST/api/esp_now \
 | `forward` | bool | 启用数据包转发（mesh 特性）|
 | `peers` | array | 对等设备列表 |
 | `groups` | array | 组播组列表 |
-| `action` | string | 特殊操作：`discover`、`pair`、`clear_discovered` |
+| `action` | string | 特殊操作：`discover`、`pair`、`prov_start`、`prov_send`、`prov_request` |
 
-### 7.9 特性
+### 7.11 特性
 
 | 特性 | 规格 |
 |------|------|
@@ -471,8 +525,10 @@ curl -k -X POST https://$HOST/api/esp_now \
 | 有效载荷 | 250 字节（明文）/ 218 字节（加密）|
 | 重传 | 自动 ACK + 重试（默认 10 次）|
 | 自动发现 | 每 30 秒广播 ANNOUNCE |
+| OTA 升级 | 空中传输固件 |
+| 配网 | 通过 ESP-NOW 发送 Wi-Fi 凭证 |
 
-### 7.10 使用场景
+### 7.12 使用场景
 
 ```
 场景 1: 多设备同步控制

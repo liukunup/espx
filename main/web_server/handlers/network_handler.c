@@ -125,6 +125,39 @@ static esp_err_t api_esp_now_handler(httpd_req_t *req)
                     err = ESP_ERR_INVALID_ARG;
                     cJSON_AddStringToObject(resp, "error", "Missing MAC address");
                 }
+            } else if (strcmp(action->valuestring, "prov_start") == 0) {
+                /* Start provisioning listener */
+                err = espx_espnow_prov_start_listener();
+                cJSON_AddStringToObject(resp, "action", "prov_start");
+            } else if (strcmp(action->valuestring, "prov_stop") == 0) {
+                /* Stop provisioning listener */
+                espx_espnow_prov_stop_listener();
+                cJSON_AddStringToObject(resp, "action", "prov_stop");
+            } else if (strcmp(action->valuestring, "prov_send") == 0) {
+                /* Send Wi-Fi credentials to device */
+                cJSON *mac_json = cJSON_GetObjectItem(config, "mac");
+                cJSON *ssid_json = cJSON_GetObjectItem(config, "ssid");
+                cJSON *pass_json = cJSON_GetObjectItem(config, "password");
+                if (cJSON_IsString(mac_json) && cJSON_IsString(ssid_json)) {
+                    uint8_t mac[6];
+                    if (sscanf(mac_json->valuestring, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+                               &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) == 6) {
+                        err = espx_espnow_prov_send_credentials(mac, ssid_json->valuestring,
+                            cJSON_IsString(pass_json) ? pass_json->valuestring : NULL);
+                        cJSON_AddStringToObject(resp, "action", "prov_send");
+                        cJSON_AddStringToObject(resp, "mac", mac_json->valuestring);
+                    } else {
+                        err = ESP_ERR_INVALID_ARG;
+                        cJSON_AddStringToObject(resp, "error", "Invalid MAC format");
+                    }
+                } else {
+                    err = ESP_ERR_INVALID_ARG;
+                    cJSON_AddStringToObject(resp, "error", "Missing MAC or SSID");
+                }
+            } else if (strcmp(action->valuestring, "prov_request") == 0) {
+                /* Request provisioning (for new device) */
+                err = espx_espnow_prov_request();
+                cJSON_AddStringToObject(resp, "action", "prov_request");
             } else {
                 err = ESP_ERR_INVALID_ARG;
                 cJSON_AddStringToObject(resp, "error", "Unknown action");

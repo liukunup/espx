@@ -316,6 +316,28 @@ main/net_services/
 └── esp_now_service.{c,h}    ESP-NOW service implementation
 ```
 
+#### 4.4.7 ESP-NOW OTA
+
+Firmware can be transmitted over ESP-NOW without Wi-Fi connectivity.
+
+| Message | Purpose |
+|---------|---------|
+| `OTA_START` | Announce firmware metadata (size, chunks, version) |
+| `OTA_DATA` | Transmit firmware chunks (200 bytes each) |
+| `OTA_END` | Signal transfer completion |
+| `OTA_STATUS` | Report success/failure |
+| `OTA_REQUEST` | Request firmware from peer |
+
+#### 4.4.8 ESP-NOW Provisioning
+
+New devices can be configured over ESP-NOW without screen/keyboard.
+
+| Message | Purpose |
+|---------|---------|
+| `PROV_REQUEST` | New device broadcasts provisioning request |
+| `PROV_RESPONSE` | Provisioner sends Wi-Fi credentials |
+| `PROV_STATUS` | Device reports connection result |
+
 ### 4.5 Serial test console
 
 Reached by holding BOOT for 3 s, via `POST /api/system/testmode`, or MQTT

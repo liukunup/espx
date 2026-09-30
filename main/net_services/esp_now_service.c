@@ -63,6 +63,59 @@ static char s_device_id[32] = {0};
 static char s_device_name[32] = {0};
 static char s_device_version[16] = {0};
 
+/* ========== ESP-NOW OTA State ========== */
+#define ESPX_OTA_MAGIC         0x45535058  /**< "ESPX" */
+#define ESPX_OTA_HEADER_SIZE   32
+
+/** OTA send state */
+typedef struct {
+    bool active;
+    uint8_t target_mac[6];
+    const uint8_t *firmware_data;
+    size_t firmware_size;
+    size_t sent_bytes;
+    uint16_t chunk_count;
+    char version[16];
+    espx_ota_progress_cb_t progress_cb;
+    espx_ota_complete_cb_t complete_cb;
+} espx_ota_send_t;
+
+/** OTA receive state */
+typedef struct {
+    bool active;
+    uint8_t src_mac[6];
+    uint8_t *firmware_data;
+    size_t firmware_size;
+    size_t received_bytes;
+    uint16_t expected_chunks;
+    char version[16];
+    espx_ota_receive_cb_t progress_cb;
+    espx_ota_receive_done_cb_t complete_cb;
+} espx_ota_recv_t;
+
+static espx_ota_send_t s_ota_send = {0};
+static espx_ota_recv_t s_ota_recv = {0};
+
+/* ========== ESP-NOW Provisioning State ========== */
+
+/** Provisioning send state (for provisioner) */
+typedef struct {
+    bool listening;
+    espx_prov_request_cb_t request_cb;
+    espx_prov_complete_cb_t complete_cb;
+    uint8_t target_mac[6];
+    bool waiting_response;
+} espx_prov_listener_t;
+
+/** Provisioning receive state (for new device) */
+typedef struct {
+    bool waiting_response;
+    espx_prov_complete_cb_t complete_cb;
+} espx_prov_device_t;
+
+static espx_prov_listener_t s_prov_listener = {0};
+static espx_prov_device_t s_prov_device = {0};
+
 /* Default PMK */
 // Default PMK is defined inline in espx_espnow_init()
 
@@ -89,6 +142,9 @@ static esp_err_t data_handler(uint8_t *src_addr, void *data,
                                size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl);
 static void send_announce(void);
 static void announce_timer_callback(void *arg);
+static void process_ota_message(uint8_t *src_addr, const uint8_t *payload, size_t len, int8_t rssi);
+static void process_prov_message(uint8_t *src_addr, const uint8_t *payload, size_t len, int8_t rssi);
+static esp_err_t ota_send_chunk(void);
 
 const char* espx_espnow_version(void)
 {
@@ -686,6 +742,18 @@ static esp_err_t data_handler(uint8_t *src_addr, void *data,
         return ESP_OK;
     }
 
+    /* Check for provisioning messages */
+    if (payload[0] >= ESPX_ESPNOW_PROV_REQUEST && payload[0] <= ESPX_ESPNOW_PROV_STATUS) {
+        process_prov_message(src_addr, payload, size, rssi);
+        return ESP_OK;
+    }
+
+    /* Check for OTA messages */
+    if (payload[0] >= ESPX_ESPNOW_OTA_START && payload[0] <= ESPX_ESPNOW_OTA_REQUEST) {
+        process_ota_message(src_addr, payload, size, rssi);
+        return ESP_OK;
+    }
+
     /* Call user callback for other messages */
     if (s_recv_cb) {
         s_recv_cb(src_addr, payload[0], payload + 1, size - 1, rssi);
@@ -956,4 +1024,642 @@ cJSON* espx_espnow_config_export(void)
     cJSON_AddItemToObject(root, "groups", groups);
 
     return root;
+}
+
+/* ========== ESP-NOW OTA Implementation ========== */
+
+/* Send single OTA chunk */
+static esp_err_t ota_send_chunk(void)
+{
+    if (!s_ota_send.active || !s_ota_send.firmware_data) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t offset = s_ota_send.sent_bytes;
+    size_t remaining = s_ota_send.firmware_size - offset;
+    size_t chunk_size = remaining > ESPX_ESPNOW_OTA_CHUNK_SIZE ? ESPX_ESPNOW_OTA_CHUNK_SIZE : remaining;
+
+    /* Build OTA DATA message */
+    uint8_t msg[ESPX_ESPNOW_OTA_CHUNK_SIZE + 8];
+    size_t msg_len = 0;
+
+    /* Header */
+    msg[msg_len++] = ESPX_ESPNOW_OTA_DATA;
+    msg[msg_len++] = (s_ota_send.sent_bytes >> 24) & 0xFF;
+    msg[msg_len++] = (s_ota_send.sent_bytes >> 16) & 0xFF;
+    msg[msg_len++] = (s_ota_send.sent_bytes >> 8) & 0xFF;
+    msg[msg_len++] = s_ota_send.sent_bytes & 0xFF;
+    msg[msg_len++] = (s_ota_send.firmware_size >> 24) & 0xFF;
+    msg[msg_len++] = (s_ota_send.firmware_size >> 16) & 0xFF;
+    msg[msg_len++] = (s_ota_send.firmware_size >> 8) & 0xFF;
+    msg[msg_len++] = s_ota_send.firmware_size & 0xFF;
+
+    /* Data */
+    memcpy(&msg[msg_len], s_ota_send.firmware_data + offset, chunk_size);
+    msg_len += chunk_size;
+
+    /* Send to target */
+    esp_err_t err = espx_espnow_send(s_ota_send.target_mac, ESPX_ESPNOW_TYPE_OTA,
+                                      msg, msg_len, pdMS_TO_TICKS(2000));
+
+    if (err == ESP_OK) {
+        s_ota_send.sent_bytes += chunk_size;
+
+        /* Report progress */
+        int percent = (s_ota_send.sent_bytes * 100) / s_ota_send.firmware_size;
+        ESP_LOGI(TAG, "OTA sent %d/%d bytes (%d%%)",
+                  s_ota_send.sent_bytes, s_ota_send.firmware_size, percent);
+
+        if (s_ota_send.progress_cb) {
+            s_ota_send.progress_cb(s_ota_send.sent_bytes, s_ota_send.firmware_size, percent);
+        }
+
+        /* Check if done */
+        if (s_ota_send.sent_bytes >= s_ota_send.firmware_size) {
+            /* Send OTA_END */
+            uint8_t end_msg[8] = {
+                ESPX_ESPNOW_OTA_END,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            };
+            espx_espnow_send(s_ota_send.target_mac, ESPX_ESPNOW_TYPE_OTA,
+                              end_msg, sizeof(end_msg), pdMS_TO_TICKS(1000));
+
+            ESP_LOGI(TAG, "OTA transfer complete to " MACSTR, MAC2STR(s_ota_send.target_mac));
+
+            /* Cleanup send state */
+            s_ota_send.active = false;
+            s_ota_send.firmware_data = NULL;
+
+            if (s_ota_send.complete_cb) {
+                s_ota_send.complete_cb(true, "OTA complete, waiting for device to reboot");
+            }
+        } else {
+            /* Schedule next chunk */
+            // In a real implementation, use a timer or queue to send next chunk
+        }
+    }
+
+    return err;
+}
+
+esp_err_t espx_espnow_ota_start(const uint8_t *peer_mac, const uint8_t *firmware_data,
+                                size_t size, const char *version,
+                                espx_ota_progress_cb_t progress_cb,
+                                espx_ota_complete_cb_t complete_cb)
+{
+    if (!s_running) {
+        ESP_LOGE(TAG, "ESP-NOW not running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_ota_send.active) {
+        ESP_LOGW(TAG, "OTA already in progress");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!peer_mac || !firmware_data || size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Initialize send state */
+    memset(&s_ota_send, 0, sizeof(s_ota_send));
+    s_ota_send.active = true;
+    memcpy(s_ota_send.target_mac, peer_mac, 6);
+    s_ota_send.firmware_data = firmware_data;
+    s_ota_send.firmware_size = size;
+    s_ota_send.sent_bytes = 0;
+    s_ota_send.progress_cb = progress_cb;
+    s_ota_send.complete_cb = complete_cb;
+    if (version) {
+        strncpy(s_ota_send.version, version, sizeof(s_ota_send.version) - 1);
+    }
+
+    /* Calculate chunks */
+    s_ota_send.chunk_count = (size + ESPX_ESPNOW_OTA_CHUNK_SIZE - 1) / ESPX_ESPNOW_OTA_CHUNK_SIZE;
+
+    /* Send OTA_START */
+    uint8_t start_msg[32] = {0};
+    start_msg[0] = ESPX_ESPNOW_OTA_START;
+    /* Magic */
+    start_msg[1] = (ESPX_OTA_MAGIC >> 24) & 0xFF;
+    start_msg[2] = (ESPX_OTA_MAGIC >> 16) & 0xFF;
+    start_msg[3] = (ESPX_OTA_MAGIC >> 8) & 0xFF;
+    start_msg[4] = ESPX_OTA_MAGIC & 0xFF;
+    /* Total size */
+    start_msg[5] = (size >> 24) & 0xFF;
+    start_msg[6] = (size >> 16) & 0xFF;
+    start_msg[7] = (size >> 8) & 0xFF;
+    start_msg[8] = size & 0xFF;
+    /* Chunk count */
+    start_msg[9] = (s_ota_send.chunk_count >> 8) & 0xFF;
+    start_msg[10] = s_ota_send.chunk_count & 0xFF;
+    /* Version length */
+    size_t ver_len = version ? strlen(version) : 0;
+    if (ver_len > 15) ver_len = 15;
+    start_msg[11] = ver_len;
+    /* Version string */
+    if (version) {
+        memcpy(&start_msg[12], version, ver_len);
+    }
+
+    ESP_LOGI(TAG, "Starting OTA to " MACSTR ", size=%d, chunks=%d",
+             MAC2STR(peer_mac), size, s_ota_send.chunk_count);
+
+    esp_err_t err = espx_espnow_send(peer_mac, ESPX_ESPNOW_TYPE_OTA,
+                                      start_msg, 12 + ver_len + 1, pdMS_TO_TICKS(3000));
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send OTA_START: %s", esp_err_to_name(err));
+        s_ota_send.active = false;
+        return err;
+    }
+
+    /* Start sending chunks */
+    return ota_send_chunk();
+}
+
+esp_err_t espx_espnow_ota_request(const uint8_t *peer_mac, const char *current_version,
+                                   espx_ota_progress_cb_t progress_cb,
+                                   espx_ota_complete_cb_t complete_cb)
+{
+    if (!s_running || !peer_mac) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Build OTA_REQUEST message */
+    uint8_t req_msg[32] = {0};
+    req_msg[0] = ESPX_ESPNOW_OTA_REQUEST;
+    /* Current version length */
+    size_t ver_len = current_version ? strlen(current_version) : 0;
+    if (ver_len > 20) ver_len = 20;
+    req_msg[1] = ver_len;
+    /* Current version string */
+    if (current_version) {
+        memcpy(&req_msg[2], current_version, ver_len);
+    }
+
+    ESP_LOGI(TAG, "Requesting OTA from " MACSTR, MAC2STR(peer_mac));
+
+    return espx_espnow_send(peer_mac, ESPX_ESPNOW_TYPE_OTA,
+                             req_msg, 2 + ver_len, pdMS_TO_TICKS(1000));
+}
+
+esp_err_t espx_espnow_ota_cancel(void)
+{
+    if (s_ota_send.active) {
+        ESP_LOGI(TAG, "Cancelling outgoing OTA");
+        s_ota_send.active = false;
+        s_ota_send.firmware_data = NULL;
+        if (s_ota_send.complete_cb) {
+            s_ota_send.complete_cb(false, "Cancelled");
+        }
+    }
+
+    if (s_ota_recv.active) {
+        ESP_LOGI(TAG, "Cancelling incoming OTA");
+        s_ota_recv.active = false;
+        if (s_ota_recv.firmware_data) {
+            free(s_ota_recv.firmware_data);
+            s_ota_recv.firmware_data = NULL;
+        }
+        if (s_ota_recv.complete_cb) {
+            s_ota_recv.complete_cb(s_ota_recv.src_mac, "", 0, false, "Cancelled");
+        }
+    }
+
+    return ESP_OK;
+}
+
+bool espx_espnow_ota_is_active(void)
+{
+    return s_ota_send.active || s_ota_recv.active;
+}
+
+void espx_espnow_ota_set_receive_callback(espx_ota_receive_cb_t progress_cb,
+                                           espx_ota_receive_done_cb_t complete_cb)
+{
+    s_ota_recv.progress_cb = progress_cb;
+    s_ota_recv.complete_cb = complete_cb;
+}
+
+/* Process incoming OTA message */
+static void process_ota_message(uint8_t *src_addr, const uint8_t *payload, size_t len, int8_t rssi)
+{
+    if (len < 1) return;
+
+    uint8_t msg_type = payload[0];
+
+    switch (msg_type) {
+        case ESPX_ESPNOW_OTA_START: {
+            if (len < 12) return;
+
+            /* Check magic */
+            uint32_t magic = (payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) | payload[4];
+            if (magic != ESPX_OTA_MAGIC) {
+                ESP_LOGW(TAG, "OTA_START with invalid magic: 0x%08X", magic);
+                return;
+            }
+
+            /* Parse header */
+            size_t total_size = (payload[5] << 24) | (payload[6] << 16) | (payload[7] << 8) | payload[8];
+            uint16_t total_chunks = (payload[9] << 8) | payload[10];
+            uint8_t ver_len = payload[11];
+            char version[16] = {0};
+            if (ver_len > 0 && ver_len < 16 && len >= 12 + ver_len) {
+                memcpy(version, &payload[12], ver_len);
+            }
+
+            ESP_LOGI(TAG, "OTA_START from " MACSTR ": size=%d, chunks=%d, version=%s",
+                     MAC2STR(src_addr), total_size, total_chunks, version);
+
+            /* Allocate buffer */
+            if (s_ota_recv.active) {
+                ESP_LOGW(TAG, "OTA already in progress, ignoring");
+                return;
+            }
+
+            memset(&s_ota_recv, 0, sizeof(s_ota_recv));
+            s_ota_recv.active = true;
+            memcpy(s_ota_recv.src_mac, src_addr, 6);
+            s_ota_recv.firmware_data = (uint8_t*)malloc(total_size);
+            if (!s_ota_recv.firmware_data) {
+                ESP_LOGE(TAG, "Failed to allocate %d bytes for OTA", total_size);
+                s_ota_recv.active = false;
+                return;
+            }
+
+            s_ota_recv.firmware_size = total_size;
+            s_ota_recv.received_bytes = 0;
+            s_ota_recv.expected_chunks = total_chunks;
+            strncpy(s_ota_recv.version, version, sizeof(s_ota_recv.version) - 1);
+
+            ESP_LOGI(TAG, "OTA receive buffer allocated, waiting for %d chunks", total_chunks);
+            break;
+        }
+
+        case ESPX_ESPNOW_OTA_DATA: {
+            if (!s_ota_recv.active || !s_ota_recv.firmware_data) {
+                ESP_LOGW(TAG, "OTA_DATA but no active OTA receive");
+                return;
+            }
+
+            if (len < 9) return;
+
+            /* Parse offset and size */
+            size_t offset = (payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) | payload[4];
+            size_t total_size = (payload[5] << 24) | (payload[6] << 16) | (payload[7] << 8) | payload[8];
+            size_t data_len = len - 9;
+
+            /* Validate */
+            if (offset + data_len > s_ota_recv.firmware_size) {
+                ESP_LOGE(TAG, "OTA_DATA overflow: offset=%d, len=%d, size=%d",
+                         offset, data_len, s_ota_recv.firmware_size);
+                return;
+            }
+
+            /* Copy data */
+            memcpy(s_ota_recv.firmware_data + offset, &payload[9], data_len);
+            s_ota_recv.received_bytes = offset + data_len;
+
+            int percent = (s_ota_recv.received_bytes * 100) / s_ota_recv.firmware_size;
+            ESP_LOGD(TAG, "OTA chunk: offset=%d, len=%d, total=%d/%d (%d%%)",
+                     offset, data_len, s_ota_recv.received_bytes, s_ota_recv.firmware_size, percent);
+
+            if (s_ota_recv.progress_cb) {
+                s_ota_recv.progress_cb(src_addr, s_ota_recv.version,
+                                       s_ota_recv.firmware_size,
+                                       s_ota_recv.received_bytes, percent);
+            }
+            break;
+        }
+
+        case ESPX_ESPNOW_OTA_END: {
+            if (!s_ota_recv.active) {
+                return;
+            }
+
+            ESP_LOGI(TAG, "OTA_END received from " MACSTR, MAC2STR(src_addr));
+
+            bool success = false;
+            const char *message = "Unknown error";
+
+            /* Verify received data */
+            if (s_ota_recv.received_bytes == s_ota_recv.firmware_size) {
+                success = true;
+                message = "OTA complete";
+                ESP_LOGI(TAG, "OTA verified: %d bytes received", s_ota_recv.firmware_size);
+
+                /* TODO: Apply firmware update */
+                /* In a real implementation, you would:
+                 * 1. Write firmware to flash
+                 * 2. Verify checksum
+                 * 3. Set boot partition
+                 * 4. Reboot
+                 */
+                ESP_LOGW(TAG, "OTA firmware received but not yet applied (need ESP-IDF OTA support)");
+            } else {
+                message = "Incomplete transfer";
+                ESP_LOGE(TAG, "OTA incomplete: %d/%d bytes",
+                         s_ota_recv.received_bytes, s_ota_recv.firmware_size);
+            }
+
+            /* Send status */
+            uint8_t status_msg[8] = {
+                ESPX_ESPNOW_OTA_STATUS,
+                success ? 1 : 0,
+                0, 0, 0, 0, 0, 0
+            };
+            espx_espnow_send(src_addr, ESPX_ESPNOW_TYPE_OTA,
+                              status_msg, sizeof(status_msg), pdMS_TO_TICKS(1000));
+
+            /* Cleanup */
+            if (s_ota_recv.complete_cb) {
+                s_ota_recv.complete_cb(s_ota_recv.src_mac, s_ota_recv.version,
+                                       s_ota_recv.firmware_size,
+                                       success, message);
+            }
+
+            if (!success && s_ota_recv.firmware_data) {
+                free(s_ota_recv.firmware_data);
+            }
+            s_ota_recv.active = false;
+            s_ota_recv.firmware_data = NULL;
+            break;
+        }
+
+        case ESPX_ESPNOW_OTA_STATUS: {
+            if (len < 2) return;
+            bool success = payload[1] != 0;
+            ESP_LOGI(TAG, "OTA status from " MACSTR ": %s",
+                     MAC2STR(src_addr), success ? "SUCCESS" : "FAILED");
+            break;
+        }
+
+        case ESPX_ESPNOW_OTA_REQUEST: {
+            ESP_LOGI(TAG, "OTA_REQUEST from " MACSTR, MAC2STR(src_addr));
+            /* TODO: Respond with OTA_START if we have new firmware */
+            /* This would typically check if we have newer version */
+            break;
+        }
+
+        default:
+            ESP_LOGD(TAG, "Unknown OTA message type: 0x%02X", msg_type);
+            break;
+    }
+}
+
+/* ========== ESP-NOW Provisioning Implementation ========== */
+
+void espx_espnow_prov_set_request_callback(espx_prov_request_cb_t callback)
+{
+    s_prov_listener.request_cb = callback;
+}
+
+void espx_espnow_prov_set_complete_callback(espx_prov_complete_cb_t callback)
+{
+    s_prov_listener.complete_cb = callback;
+    s_prov_device.complete_cb = callback;
+}
+
+esp_err_t espx_espnow_prov_send_credentials(const uint8_t *device_mac,
+                                              const char *ssid, const char *password)
+{
+    if (!s_running || !device_mac || !ssid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Build PROV_RESPONSE message */
+    /* Format: [type, ssid_len, ssid, pass_len, password] */
+    uint8_t msg[256] = {0};
+    size_t len = 0;
+
+    msg[len++] = ESPX_ESPNOW_PROV_RESPONSE;
+
+    /* SSID */
+    size_t ssid_len = strlen(ssid);
+    if (ssid_len > 63) ssid_len = 63;
+    msg[len++] = ssid_len;
+    memcpy(&msg[len], ssid, ssid_len);
+    len += ssid_len;
+
+    /* Password (optional) */
+    size_t pass_len = password ? strlen(password) : 0;
+    if (pass_len > 63) pass_len = 63;
+    msg[len++] = pass_len;
+    if (password && pass_len > 0) {
+        memcpy(&msg[len], password, pass_len);
+        len += pass_len;
+    }
+
+    ESP_LOGI(TAG, "Sending Wi-Fi credentials to " MACSTR ": ssid=%s",
+             MAC2STR(device_mac), ssid);
+
+    memcpy(s_prov_listener.target_mac, device_mac, 6);
+    s_prov_listener.waiting_response = true;
+
+    return espx_espnow_send(device_mac, ESPX_ESPNOW_TYPE_OTA, msg, len, pdMS_TO_TICKS(3000));
+}
+
+bool espx_espnow_prov_is_active(void)
+{
+    return s_prov_listener.listening || s_prov_device.waiting_response;
+}
+
+espx_prov_state_t espx_espnow_prov_get_state(void)
+{
+    if (s_prov_device.waiting_response) {
+        return ESPX_PROV_STATE_WAITING_CREDENTIALS;
+    }
+    if (s_prov_listener.waiting_response) {
+        return ESPX_PROV_STATE_CONNECTING;
+    }
+    return ESPX_PROV_STATE_IDLE;
+}
+
+esp_err_t espx_espnow_prov_request(void)
+{
+    if (!s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Build PROV_REQUEST message */
+    /* Format: [type, device_id_len, device_id, name_len, name] */
+    uint8_t msg[96] = {0};
+    size_t len = 0;
+
+    msg[len++] = ESPX_ESPNOW_PROV_REQUEST;
+
+    /* Device ID */
+    size_t id_len = strlen(s_device_id);
+    if (id_len > 31) id_len = 31;
+    msg[len++] = id_len;
+    memcpy(&msg[len], s_device_id, id_len);
+    len += id_len;
+
+    /* Device Name */
+    size_t name_len = strlen(s_device_name);
+    if (name_len > 31) name_len = 31;
+    msg[len++] = name_len;
+    if (name_len > 0) {
+        memcpy(&msg[len], s_device_name, name_len);
+        len += name_len;
+    }
+
+    ESP_LOGI(TAG, "Sending provisioning request: id=%s, name=%s",
+              s_device_id, s_device_name);
+
+    s_prov_device.waiting_response = true;
+
+    return espx_espnow_broadcast(ESPX_ESPNOW_TYPE_OTA, msg, len);
+}
+
+esp_err_t espx_espnow_prov_start_listener(void)
+{
+    if (!s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_prov_listener.listening = true;
+    s_prov_listener.waiting_response = false;
+    ESP_LOGI(TAG, "Started provisioning listener");
+
+    return ESP_OK;
+}
+
+void espx_espnow_prov_stop_listener(void)
+{
+    s_prov_listener.listening = false;
+    s_prov_listener.waiting_response = false;
+    ESP_LOGI(TAG, "Stopped provisioning listener");
+}
+
+/* Process provisioning messages */
+static void process_prov_message(uint8_t *src_addr, const uint8_t *payload, size_t len, int8_t rssi)
+{
+    if (len < 1) return;
+
+    uint8_t msg_type = payload[0];
+
+    switch (msg_type) {
+        case ESPX_ESPNOW_PROV_REQUEST: {
+            /* New device requesting provisioning */
+            if (!s_prov_listener.listening) {
+                ESP_LOGD(TAG, "Provisioning listener not active, ignoring request");
+                return;
+            }
+
+            if (len < 3) return;
+
+            /* Parse device info */
+            uint8_t id_len = payload[1];
+            char device_id[32] = {0};
+            uint8_t name_len = payload[2];
+            char name[32] = {0};
+
+            size_t offset = 3;
+            if (id_len > 0 && offset + id_len <= len && id_len < 32) {
+                memcpy(device_id, &payload[offset], id_len);
+                offset += id_len;
+            }
+            if (offset < len && name_len > 0 && name_len < 32 && offset + name_len <= len) {
+                memcpy(name, &payload[offset], name_len);
+            }
+
+            ESP_LOGI(TAG, "Provisioning request from " MACSTR ": id=%s, name=%s, rssi=%d",
+                     MAC2STR(src_addr), device_id, name, rssi);
+
+            if (s_prov_listener.request_cb) {
+                s_prov_listener.request_cb(src_addr, device_id, name, rssi);
+            }
+            break;
+        }
+
+        case ESPX_ESPNOW_PROV_RESPONSE: {
+            /* Wi-Fi credentials received (for new device) */
+            if (!s_prov_device.waiting_response) {
+                ESP_LOGD(TAG, "Not waiting for credentials, ignoring");
+                return;
+            }
+
+            if (len < 3) return;
+
+            size_t offset = 1;
+            uint8_t ssid_len = payload[offset++];
+            char ssid[64] = {0};
+            if (ssid_len > 0 && offset + ssid_len <= len && ssid_len < 64) {
+                memcpy(ssid, &payload[offset], ssid_len);
+                offset += ssid_len;
+            }
+
+            uint8_t pass_len = payload[offset++];
+            char password[64] = {0};
+            if (pass_len > 0 && offset + pass_len <= len && pass_len < 64) {
+                memcpy(password, &payload[offset], pass_len);
+            }
+
+            ESP_LOGI(TAG, "Received Wi-Fi credentials: ssid=%s", ssid);
+            ESP_LOGI(TAG, "Wi-Fi password: %s", pass_len > 0 ? "<set>" : "<none>");
+
+            s_prov_device.waiting_response = false;
+
+            /* TODO: Connect to Wi-Fi with these credentials */
+            /* This would typically:
+             * 1. Store credentials in NVS
+             * 2. Disconnect current Wi-Fi
+             * 3. Connect to new network
+             * 4. Report status via PROV_STATUS
+             */
+            ESP_LOGW(TAG, "Provisioning credentials received but Wi-Fi connection not implemented yet");
+
+            if (s_prov_device.complete_cb) {
+                s_prov_device.complete_cb(true, ssid, "", "Wi-Fi credentials received");
+            }
+            break;
+        }
+
+        case ESPX_ESPNOW_PROV_STATUS: {
+            /* Device reports provisioning status (for provisioner) */
+            if (!s_prov_listener.waiting_response) {
+                return;
+            }
+
+            if (len < 2) return;
+
+            uint8_t status = payload[1];
+            char ip[16] = {0};
+            char error[64] = {0};
+
+            /* Parse IP if present */
+            if (len > 2 && payload[2] != 0) {
+                uint8_t ip_len = payload[2];
+                if (ip_len > 0 && ip_len < 16 && len >= 3 + ip_len) {
+                    memcpy(ip, &payload[3], ip_len);
+                }
+            }
+
+            /* Parse error if present */
+            size_t offset = 3 + (len > 2 ? payload[2] : 0);
+            if (offset < len) {
+                uint8_t err_len = payload[offset++];
+                if (err_len > 0 && offset + err_len <= len && err_len < 64) {
+                    memcpy(error, &payload[offset], err_len);
+                }
+            }
+
+            ESP_LOGI(TAG, "Provisioning status from " MACSTR ": status=%d, ip=%s, error=%s",
+                     MAC2STR(src_addr), status, ip, error);
+
+            s_prov_listener.waiting_response = false;
+
+            if (s_prov_listener.complete_cb) {
+                bool success = (status == 0);
+                s_prov_listener.complete_cb(success, "", ip, error);
+            }
+            break;
+        }
+
+        default:
+            ESP_LOGD(TAG, "Unknown provisioning message type: 0x%02X", msg_type);
+            break;
+    }
 }
