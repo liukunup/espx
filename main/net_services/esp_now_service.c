@@ -496,28 +496,33 @@ esp_err_t espx_espnow_configure(const cJSON *config)
         ESP_ERROR_CHECK(espx_espnow_init(security, forward));
     }
 
-    /* Add groups */
+    /* Add/Remove groups */
     cJSON *groups = cJSON_GetObjectItem(config, "groups");
     if (cJSON_IsArray(groups)) {
         cJSON *group;
         cJSON_ArrayForEach(group, groups) {
             cJSON *id_json = cJSON_GetObjectItem(group, "id");
+            cJSON *action_json = cJSON_GetObjectItem(group, "_action");
             if (cJSON_IsString(id_json)) {
                 uint8_t gid[6];
                 if (parse_mac(id_json->valuestring, gid) == 0) {
-                    ESP_ERROR_CHECK(espx_espnow_add_group(gid));
-
-                    /* Store name if provided */
-                    cJSON *name_json = cJSON_GetObjectItem(group, "name");
-                    if (cJSON_IsString(name_json) && s_group_count > 0) {
-                        strncpy(s_groups[s_group_count - 1].name, name_json->valuestring, 31);
+                    /* Check for remove action */
+                    if (cJSON_IsString(action_json) && strcmp(action_json->valuestring, "remove") == 0) {
+                        espx_espnow_remove_group(gid);
+                    } else {
+                        ESP_ERROR_CHECK(espx_espnow_add_group(gid));
+                        /* Store name if provided */
+                        cJSON *name_json = cJSON_GetObjectItem(group, "name");
+                        if (cJSON_IsString(name_json) && s_group_count > 0) {
+                            strncpy(s_groups[s_group_count - 1].name, name_json->valuestring, 31);
+                        }
                     }
                 }
             }
         }
     }
 
-    /* Add peers */
+    /* Add/Remove peers */
     cJSON *peers = cJSON_GetObjectItem(config, "peers");
     if (cJSON_IsArray(peers)) {
         cJSON *peer;
@@ -525,30 +530,36 @@ esp_err_t espx_espnow_configure(const cJSON *config)
             cJSON *mac_json = cJSON_GetObjectItem(peer, "mac");
             cJSON *id_json = cJSON_GetObjectItem(peer, "id");
             cJSON *key_json = cJSON_GetObjectItem(peer, "key");
+            cJSON *action_json = cJSON_GetObjectItem(peer, "_action");
 
             if (cJSON_IsString(mac_json)) {
                 uint8_t mac[6];
                 if (parse_mac(mac_json->valuestring, mac) == 0) {
-                    uint8_t *peer_key = NULL;
-                    uint8_t key_buf[16] = {0};
+                    /* Check for remove action */
+                    if (cJSON_IsString(action_json) && strcmp(action_json->valuestring, "remove") == 0) {
+                        espx_espnow_remove_peer(mac);
+                    } else {
+                        uint8_t *peer_key = NULL;
+                        uint8_t key_buf[16] = {0};
 
-                    if (cJSON_IsString(key_json) && strlen(key_json->valuestring) >= 32) {
-                        peer_key = key_buf;
-                        const char *key_str = key_json->valuestring;
-                        for (int i = 0; i < 16; i++) {
-                            unsigned int val;
-                            if (sscanf(&key_str[i * 2], "%02x", &val) == 1) {
-                                key_buf[i] = (uint8_t)val;
+                        if (cJSON_IsString(key_json) && strlen(key_json->valuestring) >= 32) {
+                            peer_key = key_buf;
+                            const char *key_str = key_json->valuestring;
+                            for (int i = 0; i < 16; i++) {
+                                unsigned int val;
+                                if (sscanf(&key_str[i * 2], "%02x", &val) == 1) {
+                                    key_buf[i] = (uint8_t)val;
+                                }
                             }
                         }
-                    }
 
-                    /* Store peer ID if provided */
-                    if (s_peer_count < ESPX_ESPNOW_MAX_PEERS && cJSON_IsString(id_json)) {
-                        strncpy(s_peers[s_peer_count].id, id_json->valuestring, 31);
-                    }
+                        /* Store peer ID if provided */
+                        if (s_peer_count < ESPX_ESPNOW_MAX_PEERS && cJSON_IsString(id_json)) {
+                            strncpy(s_peers[s_peer_count].id, id_json->valuestring, 31);
+                        }
 
-                    ESP_ERROR_CHECK(espx_espnow_add_peer(mac, peer_key));
+                        ESP_ERROR_CHECK(espx_espnow_add_peer(mac, peer_key));
+                    }
                 }
             }
         }

@@ -126,6 +126,7 @@ input[type="color"] { cursor:pointer }
   <button class="tab" data-tab="peripherals">Peripherals</button>
   <button class="tab" data-tab="network">Network</button>
   <button class="tab" data-tab="mqtt">MQTT</button>
+  <button class="tab" data-tab="espnow">ESP-NOW</button>
   <button class="tab" data-tab="ota">OTA</button>
   <button class="tab" data-tab="system">System</button>
 </nav>
@@ -235,6 +236,30 @@ input[type="color"] { cursor:pointer }
       </div>
       <div class="hint" id="hint-mqtt-reconnect">MQTT reconnect is required after changes: reboot the device.</div>
     </form>
+  </div>
+</section>
+
+<!-- ================= ESP-NOW ================= -->
+<section id="tab-espnow" class="hide">
+  <div class="card">
+    <h2>ESP-NOW Status <button class="btn-s" id="btn-reload-espnow">Refresh</button></h2>
+    <div class="grid">
+      <div class="item"><div class="lbl">Status</div><div class="val" id="espx-status">-</div></div>
+      <div class="item"><div class="lbl">MAC Address</div><div class="val copyable" id="espx-mac" onclick="copyVal(this)">- <span class="copy-icon">📋</span></div></div>
+      <div class="item"><div class="lbl">Version</div><div class="val" id="espx-version">-</div></div>
+      <div class="item"><div class="lbl">Security</div><div class="val" id="espx-security">-</div></div>
+      <div class="item"><div class="lbl">Forward</div><div class="val" id="espx-forward">-</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Peers <span id="espx-peer-count" class="meta">(0)</span> <button class="btn-p" id="btn-add-peer">+ Add Peer</button></h2>
+    <div id="espx-peers-list" class="meta">No peers configured.</div>
+  </div>
+
+  <div class="card">
+    <h2>Groups <span id="espx-group-count" class="meta">(0)</span> <button class="btn-p" id="btn-add-group">+ Add Group</button></h2>
+    <div id="espx-groups-list" class="meta">No groups configured.</div>
   </div>
 </section>
 
@@ -357,6 +382,15 @@ const I18N = {
     hint_topics: 'Topics: /state, /sensors, /attrs, /cmd, ...',
     save: 'Save', reload: 'Reload', saved_reboot: 'Saved — reboot to apply',
     save_failed: 'Save failed', mqtt_reconnect: 'After MQTT configuration changes, the device must be restarted to reconnect.',
+    // espnow
+    espnow: 'ESP-NOW', espnow_status: 'ESP-NOW Status', espnow_peers: 'Peers', espnow_groups: 'Groups',
+    espnow_active: 'Active', espnow_inactive: 'Inactive', espnow_mac: 'MAC Address',
+    espnow_security: 'Security', espnow_forward: 'Forward', espnow_version: 'Version',
+    espnow_no_peers: 'No peers configured.', espnow_no_groups: 'No groups configured.',
+    espnow_add_peer: 'Add Peer', espnow_add_group: 'Add Group',
+    espnow_peer_added: 'Peer added', espnow_peer_removed: 'Peer removed',
+    espnow_group_added: 'Group added', espnow_group_removed: 'Group removed',
+    espnow_failed: 'Failed to load ESP-NOW status.',
     // ota
     firmware_update: 'Firmware update (delta OTA)', running_version: 'Running version',
     state: 'State', progress: 'Progress', received: 'Received', idle: 'IDLE',
@@ -428,6 +462,15 @@ const I18N = {
     hint_topics: '主题: /state, /sensors, /attrs, /cmd, ...',
     save: '保存', reload: '重载', saved_reboot: '已保存 — 重启后生效',
     save_failed: '保存失败', mqtt_reconnect: 'MQTT 配置变更后需要重启设备才能重连。',
+    // espnow
+    espnow: 'ESP-NOW', espnow_status: 'ESP-NOW 状态', espnow_peers: '对等设备', espnow_groups: '组播组',
+    espnow_active: '已启用', espnow_inactive: '未启用', espnow_mac: 'MAC 地址',
+    espnow_security: '加密', espnow_forward: '转发', espnow_version: '版本',
+    espnow_no_peers: '未配置对等设备。', espnow_no_groups: '未配置组播组。',
+    espnow_add_peer: '添加设备', espnow_add_group: '添加组',
+    espnow_peer_added: '对等设备已添加', espnow_peer_removed: '对等设备已移除',
+    espnow_group_added: '组播组已添加', espnow_group_removed: '组播组已移除',
+    espnow_failed: '加载 ESP-NOW 状态失败。',
     // ota
     firmware_update: '固件更新 (差分包 OTA)', running_version: '当前版本',
     state: '状态', progress: '进度', received: '已接收', idle: '空闲',
@@ -541,6 +584,13 @@ function applyLang() {
   document.querySelector('#mqtt-form button[type="submit"]').textContent = t('save');
   document.getElementById('btn-reload-mqtt').textContent = t('reload');
   document.getElementById('hint-mqtt-reconnect').textContent = t('mqtt_reconnect');
+  // espnow
+  document.querySelector('[data-tab="espnow"]').textContent = t('espnow');
+  document.querySelectorAll('#tab-espnow .card h2')[0].childNodes[0].textContent = t('espnow_status');
+  document.querySelectorAll('#tab-espnow .card h2')[1].childNodes[0].textContent = t('espnow_peers');
+  document.querySelectorAll('#tab-espnow .card h2')[2].childNodes[0].textContent = t('espnow_groups');
+  document.getElementById('btn-add-peer').textContent = t('espnow_add_peer');
+  document.getElementById('btn-add-group').textContent = t('espnow_add_group');
   // hints
   document.getElementById('hint-detools').innerHTML = t('hint_detools');
   document.getElementById('hint-device-id').textContent = t('device_id_hint');
@@ -648,6 +698,8 @@ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () =>
   document.querySelectorAll('main > section').forEach(x => x.classList.add('hide'));
   b.classList.add('active');
   document.getElementById('tab-' + b.dataset.tab).classList.remove('hide');
+  // Load ESP-NOW data when tab is shown
+  if (b.dataset.tab === 'espnow') loadEspNow();
 }));
 
 /* ---------- dashboard ---------- */
@@ -1100,6 +1152,90 @@ document.getElementById('mqtt-form').addEventListener('submit', async e => {
   try { await api('/api/network', { method: 'PUT', body: JSON.stringify(body) });
         toast(t('saved_reboot')); }
   catch (err) { toast(t('save_failed') + ': ' + err.message, 'err'); }
+});
+
+/* ---------- ESP-NOW ---------- */
+async function loadEspNow() {
+  try {
+    const res = await api('/api/esp_now');
+    document.getElementById('espx-status').textContent = res.enabled ? 'Active' : 'Inactive';
+    document.getElementById('espx-status').className = 'val ' + (res.enabled ? 'ok' : 'err');
+    document.getElementById('espx-mac').innerHTML = res.mac + ' <span class="copy-icon">📋</span>';
+    document.getElementById('espx-version').textContent = res.version || '-';
+    document.getElementById('espx-security').textContent = res.security ? 'AES-128' : 'None';
+    document.getElementById('espx-forward').textContent = res.forward ? 'Enabled' : 'Disabled';
+
+    // Peers
+    document.getElementById('espx-peer-count').textContent = '(' + (res.peer_count || 0) + ')';
+    if (res.peers && res.peers.length > 0) {
+      document.getElementById('espx-peers-list').innerHTML = res.peers.map(p =>
+        '<div class="row"><div>' +
+        '<div style="font-weight:600">' + (p.id || 'Unknown') + '</div>' +
+        '<div class="meta">' + p.mac + (p.rssi ? ' · ' + p.rssi + ' dBm' : '') + '</div>' +
+        '</div><button class="btn-d" onclick="espnowDelPeer(\'' + p.mac + '\')">Remove</button></div>'
+      ).join('');
+    } else {
+      document.getElementById('espx-peers-list').innerHTML = '<div class="meta">No peers configured.</div>';
+    }
+
+    // Groups
+    document.getElementById('espx-group-count').textContent = '(' + (res.group_count || 0) + ')';
+    if (res.groups && res.groups.length > 0) {
+      document.getElementById('espx-groups-list').innerHTML = res.groups.map(g =>
+        '<div class="row"><div>' +
+        '<div style="font-weight:600">' + (g.name || g.id) + '</div>' +
+        '<div class="meta">' + g.id + '</div>' +
+        '</div><button class="btn-d" onclick="espnowDelGroup(\'' + g.id + '\')">Remove</button></div>'
+      ).join('');
+    } else {
+      document.getElementById('espx-groups-list').innerHTML = '<div class="meta">No groups configured.</div>';
+    }
+  } catch (e) {
+    document.getElementById('espx-peers-list').innerHTML = '<div class="meta err">Failed to load ESP-NOW status.</div>';
+  }
+}
+
+async function espnowDelPeer(mac) {
+  if (!confirm('Remove peer ' + mac + '?')) return;
+  try {
+    const cfg = { peers: [{ mac: mac, _action: 'remove' }] };
+    await api('/api/esp_now', { method: 'POST', body: JSON.stringify(cfg) });
+    toast('Peer removed');
+    loadEspNow();
+  } catch (e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function espnowDelGroup(id) {
+  if (!confirm('Remove group ' + id + '?')) return;
+  try {
+    const cfg = { groups: [{ id: id, _action: 'remove' }] };
+    await api('/api/esp_now', { method: 'POST', body: JSON.stringify(cfg) });
+    toast('Group removed');
+    loadEspNow();
+  } catch (e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+document.getElementById('btn-reload-espnow').addEventListener('click', loadEspNow);
+
+document.getElementById('btn-add-peer').addEventListener('click', () => {
+  const id = prompt('Peer ID (optional):');
+  if (id === null) return;
+  const mac = prompt('Peer MAC address (e.g. AA:BB:CC:DD:EE:FF):');
+  if (!mac) { toast('MAC address required', 'warn'); return; }
+  const cfg = { peers: [{ id: id || undefined, mac: mac }] };
+  api('/api/esp_now', { method: 'POST', body: JSON.stringify(cfg) })
+    .then(() => { toast('Peer added'); loadEspNow(); })
+    .catch(e => toast('Failed: ' + e.message, 'err'));
+});
+
+document.getElementById('btn-add-group').addEventListener('click', () => {
+  const name = prompt('Group name (optional):');
+  const id = prompt('Group ID (6 bytes MAC format, e.g. 01:02:03:04:05:06):');
+  if (!id) { toast('Group ID required', 'warn'); return; }
+  const cfg = { groups: [{ name: name || undefined, id: id }] };
+  api('/api/esp_now', { method: 'POST', body: JSON.stringify(cfg) })
+    .then(() => { toast('Group added'); loadEspNow(); })
+    .catch(e => toast('Failed: ' + e.message, 'err'));
 });
 
 /* ---------- node identity ---------- */
