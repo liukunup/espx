@@ -30,6 +30,7 @@ set(espx_sources
     "net_services/net_services.c"
     "net_services/time_sync.c"
     "net_services/mdns_service.c"
+    "net_services/esp_now_service.c"
 
     # Peripheral drivers
     "peripherals/peripherals.c"
@@ -101,7 +102,7 @@ idf_component_register(
         "web_server/web_files/index.html"
         "cert_manager/certs/server.crt"
         "cert_manager/certs/server.key"
-    REQUIRES mqtt network_provisioning esp_delta_ota mdns
+    REQUIRES mqtt network_provisioning esp_delta_ota mdns esp_wifi espressif__esp-now
     PRIV_REQUIRES
         nvs_flash
         esp_netif

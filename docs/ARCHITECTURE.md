@@ -23,6 +23,8 @@ over HTTPS and MQTT.
    Web browser ──┤  WebSocket  /ws  (live state, no polling)    │
                  ├──────────────────────────────────────────────┤
    LAN ──────────┤  mDNS  <prefix><mac>.local                   │
+                 ├──────────────────────────────────────────────┤
+   ESP-NOW ─────┤  ESP-NOW  peer-to-peer (no IP needed)        │
                  │  NTP   clock sync                            │
                  ├──────────────────────────────────────────────┤
    UART console ─┤  Manufacturing test mode (self-test CLI)     │
@@ -158,8 +160,8 @@ utils/* → (libc, cJSON, NVS)    # no reverse dependency on business modules
 | `dht11` | R, P | `gpio`, `interval_ms` | bit-banged single-wire; checksum verified |
 | `button` | R, N | `gpio`, `active_level`, `pullup` | polled debounce (50 ms), no ISR |
 | `relay` | R, W, N | `gpio`, `active_level` | OFF at init |
-| `shiftreg_595` | R, W, N | `data_gpio`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count` | `count` cascades 1–8 chips (8–64 outputs) |
-| `ws2812` | R, W, N | `data_gpio`, `count`, `brightness` | RMT-driven; `count` is the LED count, 1–300 |
+| `shiftreg_595` | R, W, N | `din`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count` | `count` cascades 1–8 chips (8–64 outputs) |
+| `ws2812` | R, W, N | `din`, `count`, `brightness` | RMT-driven; `count` is the LED count, 1–300 |
 
 Write payload shapes:
 
@@ -238,7 +240,71 @@ skipped, so an idle node produces no traffic.
 Requires `CONFIG_HTTPD_WS_SUPPORT`. HTTP requests and WebSocket clients share
 the server's socket pool (`max_open_sockets`, default 7).
 
-### 4.4 Serial test console
+### 4.4 ESP-NOW
+
+ESP-NOW is a **connectionless Wi-Fi communication protocol** that enables direct,
+low-latency peer-to-peer communication between ESP devices without TCP/IP overhead.
+
+Uses the [espressif/esp-now](https://components.espressif.com/components/espressif/esp-now) component (v2.5.3).
+
+#### 4.4.1 Architecture
+
+```
+┌─────────────┐      ESP-NOW       ┌─────────────┐
+│   ESPX-1    │◄─────────────────►│   ESPX-2    │
+│  (peer)     │   Direct Wi-Fi     │  (peer)     │
+└─────────────┘   2.4 GHz          └─────────────┘
+      │
+      │ Wi-Fi Infrastructure
+      ▼
+┌─────────────┐
+│    MQTT     │
+│   Broker    │
+└─────────────┘
+```
+
+#### 4.4.2 Features
+
+| Feature | Description |
+|---------|-------------|
+| **Peer Management** | Up to 20 registered peers |
+| **Groups** | Up to 10 multicast groups |
+| **ACK & Retransmission** | Automatic retry with configurable count |
+| **Packet Forwarding** | Enable mesh-like relay capabilities |
+| **Security** | AES-128-CCM encryption (optional) |
+| **Payload** | Up to 230 bytes (encrypted: 218 bytes) |
+
+#### 4.4.3 REST API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/esp_now` | Get ESP-NOW status, peers, groups |
+| POST | `/api/esp_now` | Configure ESP-NOW, add/remove peers |
+
+#### 4.4.4 Configuration Format
+
+```json
+{
+  "enabled": true,
+  "security": false,
+  "forward": false,
+  "groups": [
+    { "id": "01:02:03:04:05:06", "name": "sensors" }
+  ],
+  "peers": [
+    { "id": "relay1", "mac": "AA:BB:CC:DD:EE:FF" }
+  ]
+}
+```
+
+#### 4.4.5 Source
+
+```
+main/net_services/
+└── esp_now_service.{c,h}    ESP-NOW service implementation
+```
+
+### 4.5 Serial test console
 
 Reached by holding BOOT for 3 s, via `POST /api/system/testmode`, or MQTT
 `cmd/config {"action":"testmode"}`.
@@ -612,7 +678,8 @@ main/
 ├── net_services/
 │   ├── net_services.{c,h}     starts the IP-dependent services
 │   ├── time_sync.{c,h}        NTP
-│   └── mdns_service.{c,h}     mDNS / DNS-SD
+│   ├── mdns_service.{c,h}     mDNS / DNS-SD
+│   └── esp_now_service.{c,h}  ESP-NOW peer-to-peer
 ├── wifi_prov/                 SoftAP/BLE provisioning
 ├── ota_service/               delta OTA
 ├── mfg_provision/             factory data

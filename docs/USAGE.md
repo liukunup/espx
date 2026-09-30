@@ -97,11 +97,11 @@ devices:
 
   - id: out16
     type: shiftreg_595
-    config: {data_gpio: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
+    config: {din: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
 
   - id: strip
     type: ws2812
-    config: {data_gpio: 48, count: 8, brightness: 128}
+    config: {din: 48, count: 8, brightness: 128}
 
 remove_devices: [old_sensor]
 YAML
@@ -321,7 +321,122 @@ NTP 与 mDNS 都在拿到 IP 之后才启动（在 Wi-Fi 连接任务里），�
 
 ---
 
-## 7. 设备写值格式速查
+## 7. ESP-NOW 对等通信
+
+ESP-NOW 是一种**无需 IP** 的直接 Wi-Fi 通信协议，适合 ESP 设备之间的低延迟控制。
+
+### 7.1 查询状态
+
+```bash
+curl -k https://$HOST/api/esp_now | python3 -m json.tool
+```
+
+返回：
+```json
+{
+  "enabled": true,
+  "security": false,
+  "forward": false,
+  "peer_count": 0,
+  "group_count": 0,
+  "version": "2.5.3",
+  "mac": "84:C7:BB:77:2E:74",
+  "peers": [],
+  "groups": []
+}
+```
+
+### 7.2 添加对等设备
+
+```bash
+# 添加单个对等设备
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "peers": [
+      {"id": "sensor1", "mac": "AA:BB:CC:DD:EE:FF"},
+      {"id": "relay2", "mac": "11:22:33:44:55:66"}
+    ]
+  }'
+```
+
+### 7.3 添加组播组
+
+```bash
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "groups": [
+      {"id": "01:02:03:04:05:06", "name": "sensors"},
+      {"id": "AA:BB:CC:DD:EE:FF", "name": "actuators"}
+    ]
+  }'
+```
+
+### 7.4 启用加密
+
+```bash
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "security": true,
+    "forward": true
+  }'
+```
+
+### 7.5 禁用 ESP-NOW
+
+```bash
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled": false}'
+```
+
+### 7.6 参数说明
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `enabled` | bool | 启用/禁用 ESP-NOW |
+| `security` | bool | 启用 AES-128 加密 |
+| `forward` | bool | 启用数据包转发（mesh 特性）|
+| `peers` | array | 对等设备列表 |
+| `groups` | array | 组播组列表 |
+
+### 7.7 特性
+
+| 特性 | 规格 |
+|------|------|
+| 对等设备数 | 最多 20 个 |
+| 组播组数 | 最多 10 个 |
+| 加密 | AES-128-CCM |
+| 有效载荷 | 250 字节（明文）/ 218 字节（加密）|
+| 重传 | 自动 ACK + 重试（默认 10 次）|
+
+### 7.8 使用场景
+
+```
+场景 1: 多设备同步控制
+┌─────────┐         ┌─────────┐
+│ ESPX-1  │─────────│ ESPX-2  │
+│ Relay1  │◄────────│ Relay2  │
+└─────────┘  ESP-NOW └─────────┘
+    │                       │
+    └──────── MQTT ─────────┘
+              │
+        ┌─────────┐
+        │  Broker │
+        └─────────┘
+
+场景 2: 传感器数据收集
+┌─────────┐         ┌─────────┐
+│ Temp1   │─────────│ ESPX    │
+│ Sensor  │◄────────│ Gateway │──► MQTT
+└─────────┘  ESP-NOW └─────────┘
+```
+
+---
+
+## 8. 设备写值格式速查
 
 ```jsonc
 // relay
