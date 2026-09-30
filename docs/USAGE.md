@@ -345,57 +345,72 @@ ESP-NOW 是一种**无需 IP** 的直接 Wi-Fi 通信协议，适合 ESP 设备�
 
 ### 7.2 ESP-NOW OTA 空中升级
 
-通过 ESP-NOW 传输固件升级，无需 Wi-Fi 连接。
-
-```
-┌──────────┐   OTA_START    ┌──────────┐
-│  ESPX-1  │ ──────────────►│  ESPX-2  │
-│ (Sender) │                │(Receiver)│
-└──────────┘   OTA_DATA (xN)└──────────┘
-      │                           │
-      └─────── OTA_END ───────────┘
-```
+使用 esp-now 组件内置的 OTA 功能，通过 ESP-NOW 传输固件升级。
 
 **OTA 流程：**
-1. `ota_start`: 发送固件元信息（大小、分片数、版本）
-2. `ota_data`: 分片传输固件数据（每片 200 字节）
-3. `ota_end`: 传输完成，接收方验证
-4. `ota_status`: 接收方返回状态
+1. Responder 连接到 WiFi，创建 OTA 任务等待升级
+2. Initiator 从 HTTP 服务器下载固件
+3. Initiator 通过 ESP-NOW 发送固件到 Responders
+4. Responder 接收并写入 flash，重启后运行新固件
+
+```
+┌──────────────┐  下载固件   ┌──────────────┐
+│  Initiator   │ ◄─────────── │ HTTP Server │
+│  (发起升级)   │              └──────────────┘
+└──────────────┘
+       │
+       │  ESP-NOW OTA_DATA
+       ▼
+┌──────────────┐  接收固件   ┌──────────────┐
+│  Responder    │ ──────────► │  写入 Flash   │
+│  (待升级设备)  │            └──────────────┘
+└──────────────┘
+```
 
 **OTA API：**
 ```bash
-# 触发发现
-curl -X POST /api/esp_now -d '{"action":"ota_request","mac":"AA:BB:CC:DD:EE:FF"}'
+# 初始化 OTA 响应者（等待升级）
+curl -X POST /api/esp_now -d '{"action":"ota_init"}'
+
+# 扫描可升级设备
+curl -X POST /api/esp_now -d '{"action":"ota_scan","timeout_ms":30000}'
+
+# 发送固件到目标设备
+curl -X POST /api/esp_now -d '{"action":"ota_send","mac":"AA:BB:CC:DD:EE:FF"}'
 ```
 
 ### 7.3 ESP-NOW 配网
 
-通过 ESP-NOW 为新设备配置 Wi-Fi 凭证，无需屏幕或按键。
+使用 esp-now 组件内置的配网功能，通过 ESP-NOW 为新设备配置 Wi-Fi 凭证。
+
+**Responder 模式：** 已连接 WiFi 的设备广播配网信标
+**Initiator 模式：** 新设备扫描并请求 WiFi 凭证
 
 ```
-┌─────────────┐  PROV_REQUEST   ┌─────────────┐
-│  新设备     │ ───────────────►│  主设备     │
-│ (未配网)    │ ◄───────────────│ (已连接WiFi)│
-└─────────────┘  PROV_RESPONSE  └─────────────┘
-      │              (SSID+密码)        │
-      │                                  │
-      └─────── PROV_STATUS ────────────┘
-           (连接结果: IP 或错误)
+┌─────────────┐  PROV_BEACON (30s)  ┌─────────────┐
+│  Responder  │ ◄────────────────── │  已配网设备  │
+│ (广播信标)   │                      │             │
+└─────────────┘                      └─────────────┘
+      ▲                                     │
+      │         PROV_REQUEST                │
+      └─────────────────────────────────────┘
+      │         PROV_RESPONSE (WiFi凭证)    │
+      ▼                                     │
+┌─────────────┐                             │
+│  Initiator  │ ───────────────────────────►│
+│  (新设备)    │  连接 WiFi                  │
+└─────────────┘
 ```
 
 **配网 API：**
 ```bash
-# 主设备：开始监听配网请求
-curl -X POST /api/esp_now -d '{"action":"prov_start"}'
+# 主设备：开始配网（广播信标 30 秒）
+curl -X POST /api/esp_now -d '{"action":"prov_start","ssid":"HomeLab","password":"12345678","duration_s":30}'
 
-# 主设备：向新设备发送 Wi-Fi 凭证
-curl -X POST /api/esp_now -d '{"action":"prov_send","mac":"AA:BB:CC:DD:EE:FF","ssid":"HomeLab","password":"12345678"}'
 
-# 新设备：请求配网
-curl -X POST /api/esp_now -d '{"action":"prov_request"}'
+# 主设备：停止配网
+curl -X POST /api/esp_now -d '{"action":"prov_stop"}'
 ```
-
-**注意：** 配网后设备会尝试连接 Wi-Fi，成功后返回 IP 地址。
 
 ### 7.4 Web 界面
 
