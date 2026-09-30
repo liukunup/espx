@@ -78,6 +78,11 @@ CONFIG_ESPX_TZ="CST-8"
 CONFIG_ESPX_MDNS_ADVERTISE_MQTT=n
 CONFIG_ESPX_WS_ENABLE=y
 
+# --- ESP-NOW: peer-to-peer without Wi-Fi router ---
+CONFIG_ESPX_ESP_NOW_ENABLE=y
+CONFIG_ESP_NOW_ENABLED=y
+CONFIG_ESP_NOW_ENCRYPT=y
+
 # --- MQTT: protocol 5.0 ---
 # EMQX 6.x and every current broker speak MQTT 5; it adds reason codes (exact
 # failure diagnosis instead of a bare 0x04/0x05), user properties, message

@@ -90,20 +90,33 @@ class Device:
                     time.sleep(self.RETRY_DELAY)
         raise last
 
-    def _req_raw(self, method, path, body, content_type, timeout=20):
-        url = f"https://{self.ip}{path}"
-        req = urllib.request.Request(url, data=body.encode(), method=method,
-                                     headers={"Content-Type": content_type})
-        try:
-            with urllib.request.urlopen(req, context=self.ctx, timeout=timeout) as r:
-                raw = r.read()
-                return r.status, (json.loads(raw) if raw else None)
-        except urllib.error.HTTPError as e:
-            raw = e.read()
+    def _req_raw(self, method, path, body, content_type, timeout=30):
+        # Same transport-level retry policy as _req(). Applying a configuration
+        # document can take a moment on the device (driver init + NVS commit), and
+        # a single transient timeout used to abort the whole run with an
+        # unhandled TimeoutError. A config push is idempotent (upsert semantics),
+        # so re-sending it is safe.
+        last = None
+        for attempt in range(self.RETRIES):
+            url = f"https://{self.ip}{path}"
+            req = urllib.request.Request(url, data=body.encode(), method=method,
+                                         headers={"Content-Type": content_type})
             try:
-                return e.code, json.loads(raw)
-            except Exception:
-                return e.code, None
+                with urllib.request.urlopen(req, context=self.ctx, timeout=timeout) as r:
+                    raw = r.read()
+                    return r.status, (json.loads(raw) if raw else None)
+            except urllib.error.HTTPError as e:
+                raw = e.read()
+                try:
+                    return e.code, json.loads(raw)
+                except Exception:
+                    return e.code, None
+            except (urllib.error.URLError, OSError) as e:
+                # TimeoutError/socket.timeout are OSError subclasses.
+                last = e
+                if attempt < self.RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY)
+        raise last
 
     def post_raw(self, path, body, content_type="text/yaml", **kw):
         return self._req_raw("POST", path, body, content_type, **kw)
@@ -140,32 +153,32 @@ def test_api(dev, args):
         print(f"        uptime={info.get('uptime')}s free_heap={info.get('free_heap')} "
               f"ip={info.get('ip')} rssi={info.get('wifi_rssi')}")
 
-    st, types = dev.get("/api/device-types")
+    st, types = dev.get("/api/peripheral/options")
     names = [t["name"] for t in types] if isinstance(types, list) else []
-    check("GET /api/device-types lists every driver",
+    check("GET /api/peripheral/options lists every driver",
           st == 200 and {"dht11", "button", "relay", "shiftreg_595", "ws2812"} <= set(names),
           f"status={st} types={names}")
     check("device types carry default configs",
           isinstance(types, list) and all("default_config" in t for t in types))
 
     # add / read / write / enable / delete
-    st, _ = dev.delete("/api/devices/nettest")
-    st, r = dev.post("/api/devices",
+    st, _ = dev.delete("/api/peripherals/nettest")
+    st, r = dev.post("/api/peripherals",
                      {"id": "nettest", "type": "relay",
                       "config": {"gpio": 5, "active_level": 1}})
-    check("POST /api/devices (add relay)", st == 200 and r and r.get("success"), f"{st} {r}")
+    check("POST /api/peripherals (add relay)", st == 200 and r and r.get("success"), f"{st} {r}")
 
-    st, r = dev.post("/api/devices/nettest/write", True)
-    check("POST /api/devices/{id}/write", st == 200 and r and r.get("success"), f"{st} {r}")
+    st, r = dev.post("/api/peripherals/nettest/write", True)
+    check("POST /api/peripherals/{id}/write", st == 200 and r and r.get("success"), f"{st} {r}")
 
-    st, r = dev.post("/api/devices/nettest/read")
-    check("POST /api/devices/{id}/read returns the state",
+    st, r = dev.post("/api/peripherals/nettest/read")
+    check("POST /api/peripherals/{id}/read returns the state",
           st == 200 and r is not None and r.get("state") is True, f"{st} {r}")
 
-    st, r = dev.post("/api/devices/nettest/enable", {"enabled": False})
-    check("POST /api/devices/{id}/enable", st == 200 and r and r.get("success"), f"{st} {r}")
+    st, r = dev.post("/api/peripherals/nettest/enable", {"enabled": False})
+    check("POST /api/peripherals/{id}/enable", st == 200 and r and r.get("success"), f"{st} {r}")
 
-    st, devs = dev.get("/api/devices")
+    st, devs = dev.get("/api/peripherals")
     nettest = next((d for d in devs if d["id"] == "nettest"), None) if isinstance(devs, list) else None
     check("a disabled device reports enabled=false and no value",
           nettest is not None and nettest.get("enabled") is False and "value" not in nettest,
@@ -173,20 +186,20 @@ def test_api(dev, args):
 
     # Re-enable so the next check sees a live value (a disabled device has none
     # by design: the driver is de-initialised).
-    dev.post("/api/devices/nettest/enable", {"enabled": True})
-    st, devs = dev.get("/api/devices")
+    dev.post("/api/peripherals/nettest/enable", {"enabled": True})
+    st, devs = dev.get("/api/peripherals")
     nettest = next((d for d in devs if d["id"] == "nettest"), None) if isinstance(devs, list) else None
-    check("GET /api/devices includes live value and config",
+    check("GET /api/peripherals includes live value and config",
           nettest is not None and "value" in nettest and "config" in nettest,
           f"{nettest}")
 
-    st, r = dev.post("/api/devices/reload")
-    check("POST /api/devices/reload", st == 200 and r and r.get("success"), f"{st} {r}")
+    st, r = dev.post("/api/peripherals/reload")
+    check("POST /api/peripherals/reload", st == 200 and r and r.get("success"), f"{st} {r}")
 
-    st, r = dev.delete("/api/devices/nettest")
-    check("DELETE /api/devices/{id}", st == 200 and r and r.get("success"), f"{st} {r}")
+    st, r = dev.delete("/api/peripherals/nettest")
+    check("DELETE /api/peripherals/{id}", st == 200 and r and r.get("success"), f"{st} {r}")
 
-    st, r = dev.delete("/api/devices/nosuchdev")
+    st, r = dev.delete("/api/peripherals/nosuchdev")
     check("DELETE of an unknown device returns 404", st == 404, f"status={st}")
 
     st, net = dev.get("/api/network")
@@ -201,8 +214,8 @@ def test_api(dev, args):
 
     # Pre-create the device that the document will remove, so "removed" is a
     # real transition rather than a no-op.
-    dev.delete("/api/devices/y1_doomed")
-    dev.post("/api/devices", {"id": "y1_doomed", "type": "relay",
+    dev.delete("/api/peripherals/y1_doomed")
+    dev.post("/api/peripherals", {"id": "y1_doomed", "type": "relay",
                               "config": {"gpio": 5, "active_level": 1}})
 
     yaml_doc = (
@@ -211,7 +224,7 @@ def test_api(dev, args):
         "devices:\n"
         "  - id: y1_strip\n"
         "    type: ws2812\n"
-        "    config: {data_gpio: 48, count: 1, brightness: 32}\n"
+        "    config: {din: 48, count: 1, brightness: 32}\n"
         "remove_devices: [y1_doomed]\n"
     )
     st, r = dev.post_raw("/api/config", yaml_doc, "text/yaml")
@@ -224,7 +237,7 @@ def test_api(dev, args):
     st, node = dev.get("/api/node")
     check("YAML: node.name applied", node and node.get("name") == "YAML-Test-Node", f"{node}")
 
-    st, devs = dev.get("/api/devices")
+    st, devs = dev.get("/api/peripherals")
     ids = [d["id"] for d in devs] if isinstance(devs, list) else []
     check("YAML: y1_strip bound, y1_doomed removed",
           "y1_strip" in ids and "y1_doomed" not in ids, f"ids={ids}")
@@ -237,11 +250,11 @@ def test_api(dev, args):
     check("malformed YAML rejected with ok=false",
           st in (200, 400) and r is not None and r.get("ok") is False, f"{st} {r}")
 
-    st, devs2 = dev.get("/api/devices")
+    st, devs2 = dev.get("/api/peripherals")
     check("rejected YAML changed nothing",
           [d["id"] for d in devs2] == ids, f"{[d['id'] for d in devs2]}")
 
-    dev.delete("/api/devices/y1_strip")
+    dev.delete("/api/peripherals/y1_strip")
     return net or {}
 
 
@@ -335,18 +348,32 @@ def test_mqtt(dev, args, net):
     if online:
         print(f"        state: {online}")
 
-    # command: set a relay through MQTT
-    dev.post("/api/devices", {"id": "mq1", "type": "relay",
-                              "config": {"gpio": 5, "active_level": 1}})
-    time.sleep(1)
+    # command: set a relay through MQTT.
+    # Start from a KNOWN state: the old code posted the device without deleting
+    # it first, so on a re-run the add failed (id already bound) and the starting
+    # value was whatever a previous run left behind. Force it OFF so the check
+    # below proves the MQTT command caused the change.
+    dev.delete("/api/peripherals/mq1")
+    st, _ = dev.post("/api/peripherals", {"id": "mq1", "type": "relay",
+                                           "config": {"gpio": 5, "active_level": 1}})
+    check("MQTT setup: relay mq1 added", st == 200, f"status={st}")
+    dev.post("/api/peripherals/mq1/write", False)
     with lock:
         received.clear()
 
     cli.publish(f"{prefix}/cmd/control/mq1", json.dumps({"action": "set", "value": True}), qos=1)
-    time.sleep(3)
 
-    st, r = dev.post("/api/devices/mq1/read")
-    check("MQTT cmd/control actuates the device", st == 200 and r and r.get("state") is True,
+    # Poll rather than sleeping a fixed 3 s: the device can be a beat slow and a
+    # fixed window made this check flaky.
+    state = None
+    st = None
+    for _ in range(30):
+        time.sleep(0.5)
+        st, r = dev.post("/api/peripherals/mq1/read")
+        state = r.get("state") if isinstance(r, dict) else None
+        if state is True:
+            break
+    check("MQTT cmd/control actuates the device", st == 200 and state is True,
           f"device state={r}")
 
     with lock:
@@ -379,21 +406,29 @@ def test_mqtt(dev, args, net):
         "    config: {gpio: 5, active_level: 1}\n"
         "  - id: mq_yaml_sr\n"
         "    type: shiftreg_595\n"
-        "    config: {data_gpio: 16, clock_gpio: 15, latch_gpio: 7, count: 2}\n"
+        "    config: {din: 16, clock_gpio: 15, latch_gpio: 7, count: 2}\n"
         "remove_devices: [mq1]\n"
     )
     cli.publish(f"{prefix}/cmd/config", yaml_doc, qos=1)
-    time.sleep(6)
 
-    with lock:
-        got = list(received)
+    # Poll for the receipt instead of sleeping a fixed 6 s. The device's first
+    # MQTT connect after a reboot can fail once with EHOSTUNREACH and succeed on
+    # retry, so a fixed window raced the reply and made this check flaky.
     result = None
-    for t, p in got:
-        if t.endswith("/config/result"):
-            try:
-                result = json.loads(p)
-            except Exception:
-                result = {"ok": False, "error": f"unparseable: {p[:80]}"}
+    got = []
+    for _ in range(40):
+        time.sleep(0.5)
+        with lock:
+            got = list(received)
+        for t, p in got:
+            if t.endswith("/config/result"):
+                try:
+                    result = json.loads(p)
+                except Exception:
+                    result = {"ok": False, "error": f"unparseable: {p[:80]}"}
+                break
+        if result is not None:
+            break
 
     check("MQTT YAML push answered on <prefix>/config/result", result is not None, f"{got}")
     if result:
@@ -404,7 +439,7 @@ def test_mqtt(dev, args, net):
         check("MQTT YAML: 1 device removed", ap.get("removed") == 1, f"{ap}")
 
     # verify through HTTPS that the MQTT push really took effect
-    st, devs = dev.get("/api/devices")
+    st, devs = dev.get("/api/peripherals")
     ids = [d["id"] for d in devs] if isinstance(devs, list) else []
     check("MQTT YAML: bindings visible over HTTPS",
           "mq_yaml_relay" in ids and "mq_yaml_sr" in ids and "mq1" not in ids, f"ids={ids}")
@@ -432,7 +467,7 @@ def test_mqtt(dev, args, net):
           any("attrs/config" in t for t, _ in got), f"{[t for t,_ in got]}")
 
     for d in ("mq1", "mq_yaml_relay", "mq_yaml_sr"):
-        dev.delete(f"/api/devices/{d}")
+        dev.delete(f"/api/peripherals/{d}")
     cli.loop_stop()
     cli.disconnect()
     broker.stop()
@@ -508,7 +543,7 @@ def test_ota(dev, args):
         if after:
             print(f"        version now: {after.get('running_version')} (was {running})")
 
-        st, devs = dev.get("/api/devices")
+        st, devs = dev.get("/api/peripherals")
         check("device configuration survived the OTA", isinstance(devs, list), f"{devs}")
     finally:
         srv.terminate()

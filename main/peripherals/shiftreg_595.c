@@ -61,10 +61,16 @@ static esp_err_t shiftreg_init(device_t *dev, const cJSON *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    cJSON *din = cJSON_GetObjectItem(config, "DS");
-    cJSON *sck = cJSON_GetObjectItem(config, "SCK");
-    cJSON *rck = cJSON_GetObjectItem(config, "RCK");
-    cJSON *oe = cJSON_GetObjectItem(config, "OE");
+    /* Keys are the ones this driver ADVERTISES via get_default_config() and
+     * that the Web UI / /api/peripheral/options present to users. They used to
+     * be the 74HC595 pin names ("DS"/"SCK"/"RCK"/"OE"), which matched neither
+     * the advertised contract nor any documentation, so a config built the
+     * documented way was rejected with ESP_ERR_INVALID_ARG and the driver could
+     * not be bound at all. Nothing in the tree ever used the old names. */
+    cJSON *din = cJSON_GetObjectItem(config, "din");
+    cJSON *sck = cJSON_GetObjectItem(config, "clock_gpio");
+    cJSON *rck = cJSON_GetObjectItem(config, "latch_gpio");
+    cJSON *oe = cJSON_GetObjectItem(config, "oe_gpio");
     cJSON *count = cJSON_GetObjectItem(config, "count");
 
     if (!cJSON_IsNumber(din) || !cJSON_IsNumber(sck) ||
@@ -113,7 +119,7 @@ static esp_err_t shiftreg_init(device_t *dev, const cJSON *config)
     shiftreg_shift_out(data, data->state, data->count);
 
     dev->driver_data = data;
-    ESP_LOGI(TAG, "74HC595 initialized: count=%d, DS=%d, SCK=%d, RCK=%d",
+    ESP_LOGI(TAG, "74HC595 initialized: count=%d, din=%d, clock=%d, latch=%d",
              data->count, data->data_gpio, data->clock_gpio, data->latch_gpio);
 
     return ESP_OK;
@@ -196,9 +202,8 @@ static esp_err_t shiftreg_write(device_t *dev, const cJSON *value)
 
 static esp_err_t shiftreg_default_config(cJSON *config)
 {
-    /* Deliberately avoids GPIO17/18: those are UART1's IO_MUX pins and UART1 is
-     * the AT command interface by default. A suggested default that collides
-     * with a fixed peripheral is a trap. */
+    /* Deliberately avoids GPIO17/18: those are UART1's IO_MUX pins. A suggested
+     * default that collides with a fixed peripheral is a trap. */
     cJSON_AddNumberToObject(config, "din", 16);
     cJSON_AddNumberToObject(config, "clock_gpio", 15);
     cJSON_AddNumberToObject(config, "latch_gpio", 7);

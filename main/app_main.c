@@ -61,6 +61,9 @@ static void wifi_status_task(void *arg)
      * sequence (which must not block on the network). */
     net_services_start();
 
+    /* ESP-NOW also starts after Wi-Fi connects */
+    net_services_start_esp_now();
+
     vTaskDelete(NULL);
 }
 

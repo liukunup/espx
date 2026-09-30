@@ -209,7 +209,7 @@ re-initialised automatically.
 **Proves:** `validate_config` runs before the hardware is touched.
 
 ```
-add bad ws2812 {"data_gpio":99,"count":1}
+add bad ws2812 {"din":99,"count":1}
 add bad2 relay {}
 ```
 

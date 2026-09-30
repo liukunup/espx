@@ -54,8 +54,8 @@ The binding statement of intent lives in [AGENT.md](AGENT.md).
 | `dht11` | read, periodic | `gpio`, `interval_ms` |
 | `button` | read, notify | `gpio`, `active_level`, `pullup` |
 | `relay` | read, write, notify | `gpio`, `active_level` |
-| `shiftreg_595` | read, write, notify | `data_gpio`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count` (1–8 cascaded) |
-| `ws2812` | read, write, notify | `data_gpio`, `count` (1–300), `brightness` |
+| `shiftreg_595` | read, write, notify | `din`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count` (1–8 cascaded) |
+| `ws2812` | read, write, notify | `din`, `count` (1–300), `brightness` |
 | `can` | read, write, notify | `tx_gpio`, `rx_gpio`, `bitrate` (125k/250k/500k/1M), `tx_queue_size`, `rx_queue_size` |
 | `mcp4725` | write, read | `sda_gpio`, `scl_gpio`, `i2c_addr`, `vref_mv`, `scl_freq` |
 | `ads1115` | read, periodic, notify | `sda_gpio`, `scl_gpio`, `i2c_addr`, `channel` (0–3), `gain`, `rate` (SPS), `interval_ms` |
@@ -132,11 +132,11 @@ devices:
 
   - id: out16                   # two cascaded 74HC595 = 16 outputs
     type: shiftreg_595
-    config: {data_gpio: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
+    config: {din: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
 
   - id: strip                   # WS2812 strip, 8 pixels
     type: ws2812
-    config: {data_gpio: 48, count: 8, brightness: 128}
+    config: {din: 48, count: 8, brightness: 128}
 
   - id: can_bus                  # TJA1050 CAN bus
     type: can

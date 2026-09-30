@@ -51,8 +51,8 @@
 | `dht11` | 读 / 周期采样 | `gpio`, `interval_ms` |
 | `button` | 读 / 变化通知 | `gpio`, `active_level`, `pullup` |
 | `relay` | 读 / 写 / 通知 | `gpio`, `active_level` |
-| `shiftreg_595` | 读 / 写 / 通知 | `data_gpio`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count`（1–8 片级联） |
-| `ws2812` | 读 / 写 / 通知 | `data_gpio`, `count`（1–300 灯珠）, `brightness` |
+| `shiftreg_595` | 读 / 写 / 通知 | `din`, `clock_gpio`, `latch_gpio`, `oe_gpio`, `count`（1–8 片级联） |
+| `ws2812` | 读 / 写 / 通知 | `din`, `count`（1–300 灯珠）, `brightness` |
 
 新增硬件只需实现一个 `device_type_t` 驱动并注册，不改动核心代码。
 
@@ -122,11 +122,11 @@ devices:
 
   - id: out16                    # 74HC595 级联 2 片 = 16 路输出
     type: shiftreg_595
-    config: {data_gpio: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
+    config: {din: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
 
   - id: strip                    # WS2812 灯带，8 灯珠
     type: ws2812
-    config: {data_gpio: 48, count: 8, brightness: 128}
+    config: {din: 48, count: 8, brightness: 128}
 
 remove_devices: [old_sensor]     # 显式删除
 replace_devices: false           # 设为 true 则删除未列出的设备

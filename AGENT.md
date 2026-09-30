@@ -102,10 +102,10 @@ devices:                      # 按 id upsert：不存在则新增，存在则�
     config: {gpio: 5, active_level: 1}
   - id: out16
     type: shiftreg_595
-    config: {data_gpio: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
+    config: {din: 16, clock_gpio: 17, latch_gpio: 18, count: 2}
   - id: strip
     type: ws2812
-    config: {data_gpio: 48, count: 8, brightness: 128}
+    config: {din: 48, count: 8, brightness: 128}
 
 remove_devices: [old1, old2]  # 显式删除
 replace_devices: false        # true 则同时删除未列出的设备

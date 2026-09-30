@@ -169,9 +169,9 @@ static esp_err_t seg7_init(device_t *dev, const cJSON *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    cJSON *pin = cJSON_GetObjectItem(config, "data_gpio");
+    cJSON *pin = cJSON_GetObjectItem(config, "gpio");
     if (!cJSON_IsNumber(pin)) {
-        ESP_LOGE(TAG, "missing data_gpio");
+        ESP_LOGE(TAG, "missing gpio");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -230,14 +230,14 @@ static esp_err_t seg7_write(device_t *dev, const cJSON *value)
 
 static esp_err_t seg7_default_config(cJSON *config)
 {
-    cJSON_AddNumberToObject(config, "data_gpio", 6);
+    cJSON_AddNumberToObject(config, "gpio", 6);
     cJSON_AddNumberToObject(config, "active_level", 1);
     return ESP_OK;
 }
 
 static esp_err_t seg7_validate_config(const cJSON *config)
 {
-    cJSON *pin = cJSON_GetObjectItem(config, "data_gpio");
+    cJSON *pin = cJSON_GetObjectItem(config, "gpio");
     if (!cJSON_IsNumber(pin)) return ESP_ERR_INVALID_ARG;
     if (pin->valueint < 0 || pin->valueint > 48) return ESP_ERR_INVALID_ARG;
     return ESP_OK;
@@ -283,7 +283,7 @@ curl -k -X POST https://$HOST/api/config -H 'Content-Type: text/yaml' -d '
 devices:
   - id: disp1
     type: seg7
-    config: {data_gpio: 6, active_level: 1}
+    config: {gpio: 6, active_level: 1}
 '
 ```
 

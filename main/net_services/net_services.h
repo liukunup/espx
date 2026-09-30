@@ -23,6 +23,11 @@ extern "C" {
 esp_err_t net_services_start(void);
 
 /**
+ * @brief Start ESP-NOW service (call after Wi-Fi connects)
+ */
+void net_services_start_esp_now(void);
+
+/**
  * @brief Whether the initial time sync has completed
  */
 bool net_services_time_ready(void);

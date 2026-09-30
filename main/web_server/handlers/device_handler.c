@@ -191,7 +191,19 @@ static esp_err_t api_device_dispatch_handler(httpd_req_t *req)
             buf[len] = '\0';
 
             cJSON *root = cJSON_Parse(buf);
-            bool enabled = cJSON_IsTrue(cJSON_GetObjectItem(root, "enabled"));
+            if (root == NULL) return api_send_error(req, "Invalid JSON", 400);
+
+            /* Require an explicit boolean. Without this test a malformed or
+             * empty body made cJSON_IsTrue(NULL-ish) evaluate to false and the
+             * device was silently DISABLED -- i.e. a garbled request switched an
+             * actuator off. Every other handler in this file rejects bad input
+             * with 400; this one now does too. */
+            cJSON *jenabled = cJSON_GetObjectItem(root, "enabled");
+            if (!cJSON_IsBool(jenabled)) {
+                cJSON_Delete(root);
+                return api_send_error(req, "Missing 'enabled' boolean", 400);
+            }
+            bool enabled = cJSON_IsTrue(jenabled);
             cJSON_Delete(root);
 
             esp_err_t err = device_set_enabled(id, enabled);

@@ -33,13 +33,28 @@ static char s_fqdn[48] = {0};
  * "espx-espx-84c7bb772e74.local". Keeping the mDNS name equal to the device id
  * also makes it match the MQTT topic prefix, so there is one identity to
  * remember rather than three.
+ *
+ * If the stored device_id lacks the "espx-" prefix (e.g. legacy config),
+ * it is added automatically so mDNS always shows "espx-<mac>.local".
  */
 static void build_hostname(void)
 {
     const char *device_id = node_config_get_device_id();
-    size_t o = 0;
+    const char *prefix = "espx-";
+    size_t prefix_len = 5;
 
-    for (const char *p = device_id; *p && o < sizeof(s_hostname) - 1; p++) {
+    /* Ensure the device_id always has the "espx-" prefix for mDNS */
+    if (strncmp(device_id, prefix, prefix_len) != 0) {
+        /* Prefix is missing: add it */
+        snprintf(s_hostname, sizeof(s_hostname), "%s%s", prefix, device_id);
+    } else {
+        strncpy(s_hostname, device_id, sizeof(s_hostname) - 1);
+        s_hostname[sizeof(s_hostname) - 1] = '\0';
+    }
+
+    /* Sanitize to valid DNS label: lowercase, keep only [a-z0-9-] */
+    size_t o = 0;
+    for (const char *p = s_hostname; *p && o < sizeof(s_hostname) - 1; p++) {
         char c = *p;
         if (c >= 'A' && c <= 'Z') {
             c = (char)(c - 'A' + 'a');

@@ -12,6 +12,7 @@
 #include "json_utils.h"
 #include "str_utils.h"
 #include "node_config.h"
+#include "esp_now_service.h"
 
 static const char *TAG = "http_network";
 
@@ -75,11 +76,45 @@ static esp_err_t api_network_handler(httpd_req_t *req)
     return api_send_error(req, "Method not allowed", 400);
 }
 
+static esp_err_t api_esp_now_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) {
+        /* Export ESP-NOW status and peers */
+        cJSON *status = espx_espnow_config_export();
+        return api_send_json(req, status, 200);
+    }
+
+    if (req->method == HTTP_POST) {
+        /* Configure ESP-NOW peers */
+        char buf[2048];
+        int len = httpd_req_recv(req, buf, sizeof(buf) - 1);
+        if (len <= 0) return api_send_error(req, "Empty body", 400);
+        buf[len] = '\0';
+
+        cJSON *config = cJSON_Parse(buf);
+        if (config == NULL) return api_send_error(req, "Invalid JSON", 400);
+
+        esp_err_t err = espx_espnow_configure(config);
+        cJSON_Delete(config);
+
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
+        if (err != ESP_OK) {
+            cJSON_AddStringToObject(resp, "error", esp_err_to_name(err));
+        }
+        return api_send_json(req, resp, err == ESP_OK ? 200 : 500);
+    }
+
+    return api_send_error(req, "Method not allowed", 400);
+}
+
 esp_err_t network_handler_register(httpd_handle_t server)
 {
     static const httpd_uri_t uris[] = {
         { .uri = "/api/network", .method = HTTP_GET, .handler = api_network_handler },
         { .uri = "/api/network", .method = HTTP_PUT, .handler = api_network_handler },
+        { .uri = "/api/esp_now", .method = HTTP_GET, .handler = api_esp_now_handler },
+        { .uri = "/api/esp_now", .method = HTTP_POST, .handler = api_esp_now_handler },
     };
 
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {

@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """
-Minimal MQTT 3.1.1 broker for ESPX integration testing.
+Minimal MQTT 3.1.1 **and 5.0** broker for ESPX integration testing.
 
 Supports only what the device needs:
   CONNECT / CONNACK, PUBLISH (QoS 0 and 1) both directions,
   SUBSCRIBE / SUBACK, PINGREQ / PINGRESP, DISCONNECT
+
+MQTT 5 support is limited to the properties envelope: the variable-length
+property block is parsed and skipped on inbound packets, and an empty property
+block is emitted on outbound ones. Individual properties are not interpreted.
+The firmware speaks MQTT 5 (CONFIG_MQTT_PROTOCOL_5) while paho-mqtt, used by the
+tests, defaults to 3.1.1, so each client's protocol level is tracked per
+connection.
 
 Not a production broker: no persistence, no QoS 2, no auth, no wildcard-subscription
 edge cases beyond '#' and '+' prefix matching needed for topic inspection.
@@ -50,11 +57,30 @@ def encode_string(s):
     return struct.pack("!H", len(b)) + b
 
 
+def decode_varlen(buf, i):
+    """Decode a variable byte integer (remaining length / property length)."""
+    mult, value = 1, 0
+    while True:
+        b = buf[i]
+        i += 1
+        value += (b & 127) * mult
+        if not b & 128:
+            return value, i
+        mult *= 128
+
+
+def skip_properties(buf, i):
+    """MQTT 5: a property block is a varint length followed by that many bytes."""
+    n, i = decode_varlen(buf, i)
+    return i + n
+
+
 class Client:
     def __init__(self, conn, addr):
         self.conn = conn
         self.addr = addr
         self.client_id = "?"
+        self.proto = 4          # MQTT 3.1.1 until CONNECT says otherwise
         self.subs = []
         self.lock = threading.Lock()
 
@@ -69,7 +95,8 @@ class Client:
         flags = (qos & 0x03) << 1
         if retain:
             flags |= 0x01
-        body = encode_string(topic) + (struct.pack("!H", 1) if qos else b"") + payload
+        props = b"\x00" if self.proto == 5 else b""
+        body = encode_string(topic) + (struct.pack("!H", 1) if qos else b"") + props + payload
         self.send_raw(bytes([(PUBLISH << 4) | flags]) + encode_remaining_length(len(body)) + body)
 
     def matches(self, topic):
@@ -111,10 +138,19 @@ class Broker:
             lvl = payload[i]; i += 1
             cflags = payload[i]; i += 1
             keepalive = struct.unpack_from("!H", payload, i)[0]; i += 2
+            cl.proto = 5 if lvl == 5 else 4
+            if cl.proto == 5:
+                # MQTT 5 inserts a property block before the client id.
+                i = skip_properties(payload, i)
             clen = struct.unpack_from("!H", payload, i)[0]; i += 2
             cl.client_id = payload[i:i + clen].decode(errors="replace")
-            self.log(f"CONNECT id={cl.client_id} keepalive={keepalive} clean={bool(cflags & 2)}")
-            cl.send_raw(bytes([CONNACK << 4, 2, 0, 0]))
+            self.log(f"CONNECT id={cl.client_id} keepalive={keepalive} "
+                     f"clean={bool(cflags & 2)} mqtt={cl.proto}")
+            if cl.proto == 5:
+                # ack flags, reason code, empty property block
+                cl.send_raw(bytes([CONNACK << 4, 3, 0, 0, 0]))
+            else:
+                cl.send_raw(bytes([CONNACK << 4, 2, 0, 0]))
 
         elif pkt_type == PUBLISH:
             qos = (flags >> 1) & 0x03
@@ -124,20 +160,27 @@ class Broker:
             i = 2 + tlen
             if qos:
                 i += 2
+            if cl.proto == 5:
+                i = skip_properties(payload, i)
             body = payload[i:]
             self.log(f"PUBLISH id={cl.client_id} topic={topic} qos={qos} retain={retain} len={len(body)}")
             if qos == 1:
                 mid = struct.unpack_from("!H", payload, 2 + tlen)[0]
-                cl.send_raw(bytes([PUBACK << 4, 2]) + struct.pack("!H", mid))
+                if cl.proto == 5:
+                    # mid, reason code, empty property block
+                    cl.send_raw(bytes([PUBACK << 4, 4]) + struct.pack("!H", mid) + b"\x00\x00")
+                else:
+                    cl.send_raw(bytes([PUBACK << 4, 2]) + struct.pack("!H", mid))
             self.publish(topic, body, exclude=cl, qos=qos, retain=retain)
-            if self.verbose:
-                print(f"    payload: {body[:200]!r}", flush=True)
             if self.verbose:
                 print(f"    payload: {body[:200]!r}", flush=True)
 
         elif pkt_type == SUBSCRIBE:
             mid = struct.unpack_from("!H", payload, 0)[0]
             i, codes = 2, []
+            if cl.proto == 5:
+                # MQTT 5 inserts a property block before the topic filters.
+                i = skip_properties(payload, i)
             while i < len(payload):
                 tlen = struct.unpack_from("!H", payload, i)[0]
                 i += 2
@@ -151,12 +194,18 @@ class Broker:
                 for t, p in list(self.retained.items()):
                     if cl.matches(t):
                         cl.send_publish(t, p)
-            body = struct.pack("!H", mid) + bytes(codes)
+            if cl.proto == 5:
+                body = struct.pack("!H", mid) + b"\x00" + bytes(codes)
+            else:
+                body = struct.pack("!H", mid) + bytes(codes)
             cl.send_raw(bytes([SUBACK << 4]) + encode_remaining_length(len(body)) + body)
 
         elif pkt_type == UNSUBSCRIBE:
             mid = struct.unpack_from("!H", payload, 0)[0]
-            cl.send_raw(bytes([UNSUBACK << 4, 2]) + struct.pack("!H", mid))
+            if cl.proto == 5:
+                cl.send_raw(bytes([UNSUBACK << 4, 4]) + struct.pack("!H", mid) + b"\x00\x00")
+            else:
+                cl.send_raw(bytes([UNSUBACK << 4, 2]) + struct.pack("!H", mid))
 
         elif pkt_type == PINGREQ:
             cl.send_raw(bytes([PINGRESP << 4, 0]))
@@ -193,7 +242,14 @@ class Broker:
                     if not chunk:
                         break
                     payload += chunk
-                self.handle(cl, pkt_type, flags, payload)
+                try:
+                    self.handle(cl, pkt_type, flags, payload)
+                except Exception as exc:  # noqa: BLE001
+                    # A malformed/unexpected packet used to kill this client's
+                    # thread, which silently closed the connection and made the
+                    # device reconnect mid-test (losing whichever message was
+                    # published during the gap). Log and keep the session alive.
+                    self.log("handle error", NAMES.get(pkt_type, pkt_type), repr(exc))
         except OSError:
             pass
         finally:
