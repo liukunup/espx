@@ -22,6 +22,19 @@ header h1 small{opacity:.75;font-weight:400;font-size:.8rem;margin-left:.5rem}
 .dot.connected{background:#4ade80}
 .dot.connecting{background:#fbbf24}
 #hdr-ws{font-size:.75rem;opacity:.9}
+#hdr-datetime{transition:color .3s}
+#hdr-datetime.pulse{animation:datetime-pulse .6s ease-out}
+@keyframes datetime-pulse{
+  0%{color:#fff;text-shadow:0 0 8px rgba(255,255,255,.8)}
+  100%{color:#fff;text-shadow:none}
+}
+#hdr-datetime.sync{color:#fbbf24}
+#hdr-dot{transition:background .3s}
+#hdr-dot.pulse{animation:dot-pulse .4s ease-out}
+@keyframes dot-pulse{
+  0%{transform:scale(1.5);box-shadow:0 0 8px var(--ok)}
+  100%{transform:scale(1);box-shadow:none}
+}
 main{max-width:1100px;margin:1.5rem auto;padding:0 1rem}
 nav{display:flex;gap:.4rem;margin-bottom:1.25rem;flex-wrap:wrap}
 .tab{padding:.5rem 1.1rem;border:1px solid var(--border);background:var(--card);
@@ -733,13 +746,21 @@ async function loadSys() {
     // Header: WS clients
     document.getElementById('n-ws').textContent = (s.ws_clients != null ? s.ws_clients : 0);
 
-    // DateTime
+    // DateTime with animation
     if (s.time) {
       const dt = document.getElementById('hdr-datetime');
       if (dt) {
         try {
           const d = new Date(s.time.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
-          dt.textContent = d.toLocaleString();
+          const newTime = d.toLocaleString();
+          if (dt.textContent !== newTime) {
+            dt.textContent = newTime;
+            // Trigger pulse animation
+            dt.classList.remove('pulse');
+            void dt.offsetWidth;
+            dt.classList.add('pulse');
+            setTimeout(() => dt.classList.remove('pulse'), 600);
+          }
         } catch(e) { dt.textContent = s.time; }
       }
     }
@@ -1287,6 +1308,18 @@ function wsConnect() {
         if (msg.time) {
           const d = new Date(msg.time.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
           document.getElementById('hdr-datetime').textContent = d.toLocaleString();
+          // Trigger animation
+          const dtEl = document.getElementById('hdr-datetime');
+          dtEl.classList.remove('pulse');
+          void dtEl.offsetWidth;  // Force reflow
+          dtEl.classList.add('pulse');
+          setTimeout(() => dtEl.classList.remove('pulse'), 600);
+          // Animate dot too
+          const dotEl = document.getElementById('hdr-dot');
+          dotEl.classList.remove('pulse');
+          void dotEl.offsetWidth;
+          dotEl.classList.add('pulse');
+          setTimeout(() => dotEl.classList.remove('pulse'), 400);
         }
         break;
       case 'state':

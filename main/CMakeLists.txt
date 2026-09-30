@@ -100,6 +100,7 @@ idf_component_register(
     INCLUDE_DIRS ${espx_include_dirs}
     EMBED_FILES
         "web_server/web_files/index.html"
+        "web_server/web_files/index.html.gz"
         "cert_manager/certs/server.crt"
         "cert_manager/certs/server.key"
     REQUIRES mqtt network_provisioning esp_delta_ota mdns esp_wifi espressif__esp-now

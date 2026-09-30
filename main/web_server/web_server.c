@@ -26,15 +26,60 @@ static httpd_handle_t g_server = NULL;
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 
+// Pre-compressed web UI (index.html.gz)
+extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_gz_end[]   asm("_binary_index_html_gz_end");
+
 /**
- * @brief Root handler - serve embedded UI
+ * @brief Check if client accepts gzip encoding
+ */
+static bool accept_gzip(httpd_req_t *req)
+{
+    char buf[64];
+    size_t buf_len = sizeof(buf);
+
+    if (httpd_req_get_hdr_value_len(req, "Accept-Encoding") == 0) {
+        return false;
+    }
+
+    if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", buf, buf_len) == ESP_OK) {
+        return strstr(buf, "gzip") != NULL;
+    }
+    return false;
+}
+
+/**
+ * @brief Root handler - serve embedded UI (with gzip support)
  */
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    size_t len = index_html_end - index_html_start;
+    size_t len;
+    const char *data;
+    const char *content_encoding = NULL;
+
+    /* Check if client accepts gzip */
+    if (accept_gzip(req)) {
+        len = index_html_gz_end - index_html_gz_start;
+        data = (const char *)index_html_gz_start;
+        content_encoding = "gzip";
+        ESP_LOGD(TAG, "Serving gzip-compressed HTML (%d bytes)", len);
+    } else {
+        len = index_html_end - index_html_start;
+        data = (const char *)index_html_start;
+        ESP_LOGD(TAG, "Serving uncompressed HTML (%d bytes)", len);
+    }
+
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    return httpd_resp_send(req, (const char *)index_html_start, len);
+
+    /* Add Content-Encoding header for gzip */
+    if (content_encoding) {
+        httpd_resp_set_hdr(req, "Content-Encoding", content_encoding);
+        /* Add Vary header to help caches */
+        httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    }
+
+    return httpd_resp_send(req, data, len);
 }
 
 esp_err_t web_server_start(void)
