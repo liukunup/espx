@@ -2,6 +2,12 @@
 #
 # Note: All sources are listed explicitly. Add new modules here.
 
+# Pre-build: gzip index.html -> index.html.gz (runs during cmake configure)
+execute_process(
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/gzip_html.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 set(espx_sources
     # Application entry
     "app_main.c"
