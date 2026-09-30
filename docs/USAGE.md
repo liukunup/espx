@@ -325,7 +325,58 @@ NTP 与 mDNS 都在拿到 IP 之后才启动（在 Wi-Fi 连接任务里），�
 
 ESP-NOW 是一种**无需 IP** 的直接 Wi-Fi 通信协议，适合 ESP 设备之间的低延迟控制。
 
-### 7.1 查询状态
+### 7.1 自动发现机制
+
+设备启动后会自动广播 **ANNOUNCE** 消息（每 30 秒），其他设备收到后会自动将发送者加入对等设备列表。
+
+```
+┌──────────┐  ANNOUNCE (30s)  ┌──────────┐
+│  ESPX-1  │ ───────────────► │  ESPX-2  │
+│          │ ◄─────────────── │          │
+└──────────┘  ANNOUNCE (30s)  └──────────┘
+     │                                 │
+     └───── DISCOVER (手动触发) ───────┘
+```
+
+**发现协议：**
+- **ANNOUNCE**: 自动广播，包含设备 ID、名称、版本
+- **DISCOVER**: 手动触发，收到后设备会响应 ANNOUNCE
+- **自动配对**: 收到陌生设备的广播后，自动加入对等列表
+
+### 7.2 Web 界面
+
+在浏览器中访问 `https://<设备IP>/`，点击顶部导航的 **ESP-NOW** 标签：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Network | MQTT | ESP-NOW | OTA | System                │
+├─────────────────────────────────────────────────────────┤
+│ ESP-NOW Status                            [Refresh]    │
+│ ┌─────────────────────────────────────────────────────┐│
+│ │ Status: Active │ MAC: 84:C7:BB:77:2E:74           ││
+│ │ Version: 2.5.3 │ Security: None │ Forward: No       ││
+│ └─────────────────────────────────────────────────────┘│
+│                                                         │
+│ Discovered Devices (0)                     [🔍 Scan]   │
+│ Click "Scan" to discover nearby devices.               │
+│                                                         │
+│ Peers (0)                                 [+ Add Peer]  │
+│ No peers configured.                                     │
+│                                                         │
+│ Groups (0)                                [+ Add Group] │
+│ No groups configured.                                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+功能说明：
+- **Status**: 显示 ESP-NOW 运行状态
+- **MAC**: 本设备 MAC 地址（可点击复制）
+- **Discovered**: 发现的其他 ESPX 设备，点击 **Pair** 配对
+- **Scan**: 发送 DISCOVER 广播，主动发现附近设备
+- **Peers**: 已配对的对等设备列表
+- **Groups**: 组播组列表
+
+### 7.3 查询状态
 
 ```bash
 curl -k https://$HOST/api/esp_now | python3 -m json.tool
@@ -339,28 +390,35 @@ curl -k https://$HOST/api/esp_now | python3 -m json.tool
   "forward": false,
   "peer_count": 0,
   "group_count": 0,
+  "discovered_count": 0,
   "version": "2.5.3",
   "mac": "84:C7:BB:77:2E:74",
   "peers": [],
+  "discovered": [],
   "groups": []
 }
 ```
 
-### 7.2 添加对等设备
+### 7.4 手动发现与配对
 
 ```bash
-# 添加单个对等设备
+# 触发 DISCOVER 广播（主动发现设备）
 curl -k -X POST https://$HOST/api/esp_now \
   -H 'Content-Type: application/json' \
-  -d '{
-    "peers": [
-      {"id": "sensor1", "mac": "AA:BB:CC:DD:EE:FF"},
-      {"id": "relay2", "mac": "11:22:33:44:55:66"}
-    ]
-  }'
+  -d '{"action": "discover"}'
+
+# 配对已发现的设备
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{"action": "pair", "mac": "AA:BB:CC:DD:EE:FF"}'
+
+# 清空发现列表
+curl -k -X POST https://$HOST/api/esp_now \
+  -H 'Content-Type: application/json' \
+  -d '{"action": "clear_discovered"}'
 ```
 
-### 7.3 添加组播组
+### 7.5 添加组播组
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -373,7 +431,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   }'
 ```
 
-### 7.4 启用加密
+### 7.6 启用加密
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -384,7 +442,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   }'
 ```
 
-### 7.5 禁用 ESP-NOW
+### 7.7 禁用 ESP-NOW
 
 ```bash
 curl -k -X POST https://$HOST/api/esp_now \
@@ -392,7 +450,7 @@ curl -k -X POST https://$HOST/api/esp_now \
   -d '{"enabled": false}'
 ```
 
-### 7.6 参数说明
+### 7.8 参数说明
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -401,8 +459,9 @@ curl -k -X POST https://$HOST/api/esp_now \
 | `forward` | bool | 启用数据包转发（mesh 特性）|
 | `peers` | array | 对等设备列表 |
 | `groups` | array | 组播组列表 |
+| `action` | string | 特殊操作：`discover`、`pair`、`clear_discovered` |
 
-### 7.7 特性
+### 7.9 特性
 
 | 特性 | 规格 |
 |------|------|
@@ -411,8 +470,9 @@ curl -k -X POST https://$HOST/api/esp_now \
 | 加密 | AES-128-CCM |
 | 有效载荷 | 250 字节（明文）/ 218 字节（加密）|
 | 重传 | 自动 ACK + 重试（默认 10 次）|
+| 自动发现 | 每 30 秒广播 ANNOUNCE |
 
-### 7.8 使用场景
+### 7.10 使用场景
 
 ```
 场景 1: 多设备同步控制

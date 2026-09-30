@@ -253,6 +253,12 @@ input[type="color"] { cursor:pointer }
   </div>
 
   <div class="card">
+    <h2>Discovered Devices <span id="espx-discovered-count" class="meta">(0)</span> <button class="btn-p" id="btn-scan-espnow">🔍 Scan</button></h2>
+    <div id="espx-discovered-list" class="meta">Click "Scan" to discover nearby ESP-NOW devices.</div>
+    <div class="hint" id="hint-espnow-discovery">Devices auto-announce every 30s. Discovered devices are automatically paired.</div>
+  </div>
+
+  <div class="card">
     <h2>Peers <span id="espx-peer-count" class="meta">(0)</span> <button class="btn-p" id="btn-add-peer">+ Add Peer</button></h2>
     <div id="espx-peers-list" class="meta">No peers configured.</div>
   </div>
@@ -384,13 +390,17 @@ const I18N = {
     save_failed: 'Save failed', mqtt_reconnect: 'After MQTT configuration changes, the device must be restarted to reconnect.',
     // espnow
     espnow: 'ESP-NOW', espnow_status: 'ESP-NOW Status', espnow_peers: 'Peers', espnow_groups: 'Groups',
+    espnow_discovered: 'Discovered Devices', espnow_scan: 'Scan',
     espnow_active: 'Active', espnow_inactive: 'Inactive', espnow_mac: 'MAC Address',
     espnow_security: 'Security', espnow_forward: 'Forward', espnow_version: 'Version',
     espnow_no_peers: 'No peers configured.', espnow_no_groups: 'No groups configured.',
+    espnow_no_discovered: 'No devices discovered yet.', espnow_scanning: 'Scanning...',
     espnow_add_peer: 'Add Peer', espnow_add_group: 'Add Group',
     espnow_peer_added: 'Peer added', espnow_peer_removed: 'Peer removed',
     espnow_group_added: 'Group added', espnow_group_removed: 'Group removed',
+    espnow_device_paired: 'Device paired', espnow_scan_sent: 'Discovery broadcast sent',
     espnow_failed: 'Failed to load ESP-NOW status.',
+    espnow_hint_discovery: 'Devices auto-announce every 30s. Discovered devices are automatically paired.',
     // ota
     firmware_update: 'Firmware update (delta OTA)', running_version: 'Running version',
     state: 'State', progress: 'Progress', received: 'Received', idle: 'IDLE',
@@ -464,13 +474,16 @@ const I18N = {
     save_failed: '保存失败', mqtt_reconnect: 'MQTT 配置变更后需要重启设备才能重连。',
     // espnow
     espnow: 'ESP-NOW', espnow_status: 'ESP-NOW 状态', espnow_peers: '对等设备', espnow_groups: '组播组',
+    espnow_discovered: '发现的设备', espnow_scan: '扫描',
     espnow_active: '已启用', espnow_inactive: '未启用', espnow_mac: 'MAC 地址',
     espnow_security: '加密', espnow_forward: '转发', espnow_version: '版本',
     espnow_no_peers: '未配置对等设备。', espnow_no_groups: '未配置组播组。',
+    espnow_no_discovered: '暂未发现设备。点击"扫描"或等待自动广播。', espnow_scanning: '扫描中...',
     espnow_add_peer: '添加设备', espnow_add_group: '添加组',
     espnow_peer_added: '对等设备已添加', espnow_peer_removed: '对等设备已移除',
     espnow_group_added: '组播组已添加', espnow_group_removed: '组播组已移除',
-    espnow_failed: '加载 ESP-NOW 状态失败。',
+    espnow_device_paired: '设备已配对', espnow_scan_sent: '广播已发送',
+    espnow_failed: '加载 ESP-NOW 状态失败。', espnow_hint_discovery: '设备每 30 秒自动广播。发现的设备将自动配对。',
     // ota
     firmware_update: '固件更新 (差分包 OTA)', running_version: '当前版本',
     state: '状态', progress: '进度', received: '已接收', idle: '空闲',
@@ -587,8 +600,10 @@ function applyLang() {
   // espnow
   document.querySelector('[data-tab="espnow"]').textContent = t('espnow');
   document.querySelectorAll('#tab-espnow .card h2')[0].childNodes[0].textContent = t('espnow_status');
-  document.querySelectorAll('#tab-espnow .card h2')[1].childNodes[0].textContent = t('espnow_peers');
-  document.querySelectorAll('#tab-espnow .card h2')[2].childNodes[0].textContent = t('espnow_groups');
+  document.querySelectorAll('#tab-espnow .card h2')[1].childNodes[0].textContent = t('espnow_discovered');
+  document.getElementById('btn-scan-espnow').textContent = t('espnow_scan');
+  document.querySelectorAll('#tab-espnow .card h2')[2].childNodes[0].textContent = t('espnow_peers');
+  document.querySelectorAll('#tab-espnow .card h2')[3].childNodes[0].textContent = t('espnow_groups');
   document.getElementById('btn-add-peer').textContent = t('espnow_add_peer');
   document.getElementById('btn-add-group').textContent = t('espnow_add_group');
   // hints
@@ -1165,6 +1180,20 @@ async function loadEspNow() {
     document.getElementById('espx-security').textContent = res.security ? 'AES-128' : 'None';
     document.getElementById('espx-forward').textContent = res.forward ? 'Enabled' : 'Disabled';
 
+    // Discovered devices
+    const discCount = res.discovered ? res.discovered.length : 0;
+    document.getElementById('espx-discovered-count').textContent = '(' + discCount + ')';
+    if (res.discovered && res.discovered.length > 0) {
+      document.getElementById('espx-discovered-list').innerHTML = res.discovered.map(d =>
+        '<div class="row"><div>' +
+        '<div style="font-weight:600">' + (d.name || d.device_id || 'Unknown') + '</div>' +
+        '<div class="meta">' + d.mac + (d.rssi ? ' · ' + d.rssi + ' dBm' : '') + (d.version ? ' · v' + d.version : '') + '</div>' +
+        '</div><button class="btn-d" onclick="espnowPair(\'"' + d.mac + "'\"')">Pair</button></div>'
+      ).join('');
+    } else {
+      document.getElementById('espx-discovered-list').innerHTML = '<div class="meta">No devices discovered yet. Click "Scan" or wait for auto-announce.</div>';
+    }
+
     // Peers
     document.getElementById('espx-peer-count').textContent = '(' + (res.peer_count || 0) + ')';
     if (res.peers && res.peers.length > 0) {
@@ -1191,7 +1220,7 @@ async function loadEspNow() {
       document.getElementById('espx-groups-list').innerHTML = '<div class="meta">No groups configured.</div>';
     }
   } catch (e) {
-    document.getElementById('espx-peers-list').innerHTML = '<div class="meta err">Failed to load ESP-NOW status.</div>';
+    document.getElementById('espx-discovered-list').innerHTML = '<div class="meta err">Failed to load ESP-NOW status.</div>';
   }
 }
 
@@ -1215,7 +1244,26 @@ async function espnowDelGroup(id) {
   } catch (e) { toast('Failed: ' + e.message, 'err'); }
 }
 
+async function espnowScan() {
+  try {
+    document.getElementById('espx-discovered-list').innerHTML = '<div class="meta">Scanning...</div>';
+    await api('/api/esp_now', { method: 'POST', body: JSON.stringify({ action: 'discover' }) });
+    toast('Discovery broadcast sent');
+    // Reload after a short delay to show results
+    setTimeout(loadEspNow, 2000);
+  } catch (e) { toast('Scan failed: ' + e.message, 'err'); }
+}
+
+async function espnowPair(mac) {
+  try {
+    await api('/api/esp_now', { method: 'POST', body: JSON.stringify({ action: 'pair', mac: mac }) });
+    toast('Device paired');
+    loadEspNow();
+  } catch (e) { toast('Pair failed: ' + e.message, 'err'); }
+}
+
 document.getElementById('btn-reload-espnow').addEventListener('click', loadEspNow);
+document.getElementById('btn-scan-espnow').addEventListener('click', espnowScan);
 
 document.getElementById('btn-add-peer').addEventListener('click', () => {
   const id = prompt('Peer ID (optional):');

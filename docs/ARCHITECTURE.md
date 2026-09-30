@@ -215,6 +215,8 @@ paths win over the wildcard dispatcher.
 | POST | `/api/ota/start` | `{"url":"http://…/fw.patch"}` |
 | POST | `/api/ota/cancel` | cancel a running update |
 | GET | `/api/certs/info` | certificate metadata |
+| GET | `/api/esp_now` | ESP-NOW status, peers, groups |
+| POST | `/api/esp_now` | configure ESP-NOW |
 | POST | `/api/system/reboot` | reboot |
 | POST | `/api/system/testmode` | reboot into manufacturing test mode |
 | GET | `/api/peripherals/*` | device detail |
@@ -281,23 +283,33 @@ Uses the [espressif/esp-now](https://components.espressif.com/components/espress
 | GET | `/api/esp_now` | Get ESP-NOW status, peers, groups |
 | POST | `/api/esp_now` | Configure ESP-NOW, add/remove peers |
 
-#### 4.4.4 Configuration Format
+#### 4.4.4 Web UI
+
+The ESP-NOW tab in the web interface provides:
+- Real-time status display (Active/Inactive, MAC, version, security)
+- Peer management (add/remove peers with MAC and optional ID)
+- Group management (add/remove multicast groups)
+- One-click refresh
+
+#### 4.4.5 Configuration Format
 
 ```json
-{
-  "enabled": true,
-  "security": false,
-  "forward": false,
-  "groups": [
-    { "id": "01:02:03:04:05:06", "name": "sensors" }
-  ],
-  "peers": [
-    { "id": "relay1", "mac": "AA:BB:CC:DD:EE:FF" }
-  ]
-}
+// Add peers
+POST /api/esp_now
+{"peers": [{"id": "sensor1", "mac": "AA:BB:CC:DD:EE:FF"}]}
+
+// Remove peer
+POST /api/esp_now
+{"peers": [{"mac": "AA:BB:CC:DD:EE:FF", "_action": "remove"}]}
+// Add groups
+POST /api/esp_now
+{"groups": [{"name": "sensors", "id": "01:02:03:04:05:06"}]}
+// Remove group
+POST /api/esp_now
+{"groups": [{"id": "01:02:03:04:05:06", "_action": "remove"}]}
 ```
 
-#### 4.4.5 Source
+#### 4.4.6 Source
 
 ```
 main/net_services/

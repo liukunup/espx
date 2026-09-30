@@ -44,12 +44,24 @@ static int s_peer_count = 0;
 static espx_espnow_group_info_t s_groups[ESPX_ESPNOW_MAX_GROUPS] = {0};
 static int s_group_count = 0;
 
+/* Discovery management */
+static espx_espnow_discovered_t s_discovered[ESPX_ESPNOW_MAX_DISCOVERED] = {0};
+static int s_discovered_count = 0;
+
 /* Configuration */
 static bool s_security_enabled = false;
 static bool s_forward_enabled = true;
 
 /* Callbacks */
 static espx_espnow_recv_callback_t s_recv_cb = NULL;
+
+/* Periodic announce timer handle */
+static esp_timer_handle_t s_announce_timer = NULL;
+
+/* Device info for announcements */
+static char s_device_id[32] = {0};
+static char s_device_name[32] = {0};
+static char s_device_version[16] = {0};
 
 /* Default PMK */
 // Default PMK is defined inline in espx_espnow_init()
@@ -75,6 +87,8 @@ static void mac_to_str(const uint8_t *mac, char *buf, size_t len)
 /* Forward declarations */
 static esp_err_t data_handler(uint8_t *src_addr, void *data,
                                size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl);
+static void send_announce(void);
+static void announce_timer_callback(void *arg);
 
 const char* espx_espnow_version(void)
 {
@@ -96,6 +110,31 @@ esp_err_t espx_espnow_init(bool enable_security, bool enable_forward)
     /* Store configuration */
     s_security_enabled = enable_security;
     s_forward_enabled = enable_forward;
+
+    /* Get device info from app_info if available */
+    #ifdef CONFIG_ESPX_DEVICE_ID
+    strncpy(s_device_id, CONFIG_ESPX_DEVICE_ID, sizeof(s_device_id) - 1);
+    #else
+    /* Use last 6 chars of MAC as default device_id */
+    snprintf(s_device_id, sizeof(s_device_id), "%02X%02X%02X",
+             s_local_mac[3], s_local_mac[4], s_local_mac[5]);
+    #endif
+
+    #ifdef CONFIG_ESPX_DEVICE_NAME
+    strncpy(s_device_name, CONFIG_ESPX_DEVICE_NAME, sizeof(s_device_name) - 1);
+    #else
+    snprintf(s_device_name, sizeof(s_device_name), "ESPX-%02X%02X",
+             s_local_mac[4], s_local_mac[5]);
+    #endif
+
+    #ifdef CONFIG_ESPX_FIRMWARE_VERSION
+    strncpy(s_device_version, CONFIG_ESPX_FIRMWARE_VERSION, sizeof(s_device_version) - 1);
+    #else
+    strncpy(s_device_version, "1.0.0", sizeof(s_device_version) - 1);
+    #endif
+
+    ESP_LOGI(TAG, "Device info: id=%s name=%s ver=%s",
+             s_device_id, s_device_name, s_device_version);
 
     /* Configure ESP-NOW - use default PMK, configure other options */
     espnow_config_t config = ESPNOW_INIT_CONFIG_DEFAULT();
@@ -154,8 +193,27 @@ esp_err_t espx_espnow_start(void)
         }
     }
 
+    /* Create periodic announce timer */
+    if (s_announce_timer == NULL) {
+        esp_timer_create_args_t timer_args = {
+            .callback = &announce_timer_callback,
+            .arg = NULL,
+            .name = "espnow_announce",
+            .dispatch_method = ESP_TIMER_TASK
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_announce_timer));
+    }
+
+    /* Start periodic announce timer */
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_announce_timer,
+                                              ESPX_ESPNOW_ANNOUNCE_INTERVAL_MS * 1000));
+
     s_running = true;
-    ESP_LOGI(TAG, "ESP-NOW service started");
+    ESP_LOGI(TAG, "ESP-NOW service started, announcing every %ds",
+             ESPX_ESPNOW_ANNOUNCE_INTERVAL_MS / 1000);
+
+    /* Send initial announce */
+    send_announce();
 
     return ESP_OK;
 }
@@ -164,6 +222,11 @@ esp_err_t espx_espnow_stop(void)
 {
     if (!s_running) {
         return ESP_OK;
+    }
+
+    /* Stop announce timer */
+    if (s_announce_timer) {
+        esp_timer_stop(s_announce_timer);
     }
 
     s_running = false;
@@ -195,6 +258,17 @@ esp_err_t espx_espnow_deinit(void)
         }
     }
     s_group_count = 0;
+
+    /* Clear discovered list */
+    s_discovered_count = 0;
+    memset(s_discovered, 0, sizeof(s_discovered));
+
+    /* Delete announce timer */
+    if (s_announce_timer) {
+        esp_timer_stop(s_announce_timer);
+        esp_timer_delete(s_announce_timer);
+        s_announce_timer = NULL;
+    }
 
     /* Deinitialize */
     esp_err_t err = ESPNOW_API(deinit)();
@@ -435,6 +509,163 @@ void espx_espnow_set_recv_callback(espx_espnow_recv_callback_t callback)
     s_recv_cb = callback;
 }
 
+/* Find or add discovered device */
+static espx_espnow_discovered_t* find_or_add_discovered(const uint8_t *mac)
+{
+    /* Check if already in discovered list */
+    for (int i = 0; i < s_discovered_count; i++) {
+        if (memcmp(s_discovered[i].mac, mac, 6) == 0) {
+            return &s_discovered[i];
+        }
+    }
+
+    /* Add new discovered device */
+    if (s_discovered_count >= ESPX_ESPNOW_MAX_DISCOVERED) {
+        ESP_LOGW(TAG, "Discovered list full, removing oldest");
+        /* Remove oldest (first) and shift */
+        memmove(&s_discovered[0], &s_discovered[1],
+                (ESPX_ESPNOW_MAX_DISCOVERED - 1) * sizeof(espx_espnow_discovered_t));
+        s_discovered_count--;
+    }
+
+    memset(&s_discovered[s_discovered_count], 0, sizeof(espx_espnow_discovered_t));
+    memcpy(s_discovered[s_discovered_count].mac, mac, 6);
+    s_discovered_count++;
+
+    return &s_discovered[s_discovered_count - 1];
+}
+
+/* Check if device is already paired */
+static bool is_peer_paired(const uint8_t *mac)
+{
+    for (int i = 0; i < s_peer_count; i++) {
+        if (memcmp(s_peers[i].mac, mac, 6) == 0 && s_peers[i].paired) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Process discovery/announce message */
+static void process_discovery_msg(uint8_t *src_addr, const uint8_t *payload, size_t len, int8_t rssi)
+{
+    if (len < 3) return;  /* Need at least msg_type + version[2] */
+
+    uint8_t msg_type = payload[0];
+    uint8_t ver_major = payload[1];
+    uint8_t ver_minor = payload[2];
+
+    ESP_LOGI(TAG, "Discovery msg from " MACSTR ": type=%d v%d.%d",
+             MAC2STR(src_addr), msg_type, ver_major, ver_minor);
+
+    /* Don't process our own messages */
+    if (memcmp(src_addr, s_local_mac, 6) == 0) {
+        return;
+    }
+
+    /* Skip if already paired */
+    if (is_peer_paired(src_addr)) {
+        /* Update last_seen */
+        for (int i = 0; i < s_peer_count; i++) {
+            if (memcmp(s_peers[i].mac, src_addr, 6) == 0) {
+                s_peers[i].last_seen_ms = esp_timer_get_time() / 1000;
+                s_peers[i].rssi = rssi;
+                break;
+            }
+        }
+        return;
+    }
+
+    /* Add to discovered list */
+    espx_espnow_discovered_t *disc = find_or_add_discovered(src_addr);
+    disc->last_seen_ms = esp_timer_get_time() / 1000;
+    disc->rssi = rssi;
+    snprintf(disc->version, sizeof(disc->version), "%d.%d", ver_major, ver_minor);
+
+    /* Parse optional fields if present */
+    if (len > 3 && payload[3] != 0) {
+        /* device_id follows */
+        size_t offset = 3;
+        size_t id_len = payload[offset];
+        if (id_len > 0 && offset + 1 + id_len <= len) {
+            strncpy(disc->device_id, (const char*)&payload[offset + 1],
+                    id_len < 31 ? id_len : 31);
+            disc->device_id[id_len < 31 ? id_len : 31] = 0;
+            offset += 1 + id_len;
+        }
+
+        /* name follows */
+        if (offset < len && payload[offset] != 0) {
+            size_t name_len = payload[offset];
+            if (offset + 1 + name_len <= len) {
+                strncpy(disc->name, (const char*)&payload[offset + 1],
+                        name_len < 31 ? name_len : 31);
+                disc->name[name_len < 31 ? name_len : 31] = 0;
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Discovered device: %s (%s) RSSI=%d",
+             disc->device_id[0] ? disc->device_id : "unknown",
+             disc->name[0] ? disc->name : "no-name", rssi);
+
+    /* Auto-pair: automatically add to peer list */
+    espx_espnow_add_peer(src_addr, NULL);
+}
+
+/* Build and send announce message */
+static void send_announce(void)
+{
+    /* Build announce payload:
+     * [0] msg_type = ANNOUNCE_MSG
+     * [1] ver_major
+     * [2] ver_minor
+     * [3] device_id_len + device_id
+     * [n] name_len + name
+     */
+    uint8_t payload[64] = {0};
+    size_t len = 0;
+
+    payload[len++] = ESPX_ESPNOW_ANNOUNCE_MSG;
+    payload[len++] = (uint8_t)atoi(s_device_version);
+    payload[len++] = (uint8_t)atoi(strchr(s_device_version, '.') ? strchr(s_device_version, '.') + 1 : "0");
+
+    /* Device ID */
+    size_t id_len = strlen(s_device_id);
+    if (id_len > 0) {
+        payload[len++] = (uint8_t)id_len;
+        memcpy(&payload[len], s_device_id, id_len);
+        len += id_len;
+    } else {
+        payload[len++] = 0;
+    }
+
+    /* Name */
+    size_t name_len = strlen(s_device_name);
+    if (name_len > 0) {
+        payload[len++] = (uint8_t)name_len;
+        memcpy(&payload[len], s_device_name, name_len);
+        len += name_len;
+    } else {
+        payload[len++] = 0;
+    }
+
+    /* Broadcast */
+    esp_err_t err = espx_espnow_broadcast(ESPX_ESPNOW_TYPE_DATA, payload, len);
+    if (err == ESP_OK) {
+        ESP_LOGD(TAG, "Announce sent, %d bytes", len);
+    }
+}
+
+/* Announce timer callback */
+static void announce_timer_callback(void *arg)
+{
+    (void)arg;
+    if (s_running) {
+        send_announce();
+    }
+}
+
 /* Data handler callback from espnow component */
 static esp_err_t data_handler(uint8_t *src_addr, void *data,
                                size_t size, wifi_pkt_rx_ctrl_t *rx_ctrl)
@@ -444,13 +675,20 @@ static esp_err_t data_handler(uint8_t *src_addr, void *data,
     }
 
     int8_t rssi = rx_ctrl ? rx_ctrl->rssi : 0;
+    uint8_t *payload = (uint8_t*)data;
 
-    ESP_LOGD(TAG, "ESP-NOW recv from " MACSTR " len=%d rssi=%d",
-            MAC2STR(src_addr), size, rssi);
+    ESP_LOGD(TAG, "ESP-NOW recv from " MACSTR " len=%d rssi=%d type=%d",
+            MAC2STR(src_addr), size, rssi, payload[0]);
 
-    /* Call user callback if registered */
+    /* Check for discovery messages */
+    if (payload[0] == ESPX_ESPNOW_DISCOVER_MSG || payload[0] == ESPX_ESPNOW_ANNOUNCE_MSG) {
+        process_discovery_msg(src_addr, payload, size, rssi);
+        return ESP_OK;
+    }
+
+    /* Call user callback for other messages */
     if (s_recv_cb) {
-        s_recv_cb(src_addr, 0, data, size, rssi);
+        s_recv_cb(src_addr, payload[0], payload + 1, size - 1, rssi);
     }
 
     /* Update peer last_seen */
@@ -464,6 +702,67 @@ static esp_err_t data_handler(uint8_t *src_addr, void *data,
 
     return ESP_OK;
 }
+
+/* ========== Discovery API ========== */
+
+esp_err_t espx_espnow_discover(void)
+{
+    if (!s_running) {
+        ESP_LOGW(TAG, "ESP-NOW not running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Send DISCOVER message */
+    uint8_t payload[3] = {
+        ESPX_ESPNOW_DISCOVER_MSG,
+        (uint8_t)atoi(s_device_version),
+        (uint8_t)atoi(strchr(s_device_version, '.') ? strchr(s_device_version, '.') + 1 : "0")
+    };
+
+    ESP_LOGI(TAG, "Sending DISCOVER broadcast...");
+    return espx_espnow_broadcast(ESPX_ESPNOW_TYPE_DATA, payload, 3);
+}
+
+int espx_espnow_get_discovered_count(void)
+{
+    return s_discovered_count;
+}
+
+const espx_espnow_discovered_t* espx_espnow_get_discovered(int index)
+{
+    if (index < 0 || index >= s_discovered_count) {
+        return NULL;
+    }
+    return &s_discovered[index];
+}
+
+esp_err_t espx_espnow_pair_discovered(const uint8_t *mac)
+{
+    /* Find in discovered list */
+    for (int i = 0; i < s_discovered_count; i++) {
+        if (memcmp(s_discovered[i].mac, mac, 6) == 0) {
+            /* Add to peer list */
+            esp_err_t err = espx_espnow_add_peer(mac, NULL);
+            if (err == ESP_OK) {
+                /* Copy device_id to peer */
+                if (s_discovered[i].device_id[0] && s_peer_count > 0) {
+                    strncpy(s_peers[s_peer_count - 1].id, s_discovered[i].device_id, 31);
+                }
+                ESP_LOGI(TAG, "Paired with discovered device " MACSTR, MAC2STR(mac));
+            }
+            return err;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+void espx_espnow_clear_discovered(void)
+{
+    s_discovered_count = 0;
+    memset(s_discovered, 0, sizeof(s_discovered));
+}
+
+/* ========== Configuration ========== */
 
 esp_err_t espx_espnow_configure(const cJSON *config)
 {
@@ -582,6 +881,7 @@ cJSON* espx_espnow_config_export(void)
     cJSON_AddBoolToObject(root, "forward", s_forward_enabled);
     cJSON_AddNumberToObject(root, "peer_count", s_peer_count);
     cJSON_AddNumberToObject(root, "group_count", s_group_count);
+    cJSON_AddNumberToObject(root, "discovered_count", s_discovered_count);
 
     /* Export version */
     cJSON_AddStringToObject(root, "version", espx_espnow_version());
@@ -607,6 +907,38 @@ cJSON* espx_espnow_config_export(void)
         cJSON_AddItemToArray(peers, peer);
     }
     cJSON_AddItemToObject(root, "peers", peers);
+
+    /* Export discovered devices */
+    cJSON *discovered = cJSON_CreateArray();
+    for (int i = 0; i < s_discovered_count; i++) {
+        /* Skip if already paired */
+        bool already_paired = false;
+        for (int j = 0; j < s_peer_count; j++) {
+            if (memcmp(s_discovered[i].mac, s_peers[j].mac, 6) == 0) {
+                already_paired = true;
+                break;
+            }
+        }
+        if (already_paired) continue;
+
+        cJSON *dev = cJSON_CreateObject();
+        char disc_mac[32];
+        mac_to_str(s_discovered[i].mac, disc_mac, sizeof(disc_mac));
+        cJSON_AddStringToObject(dev, "mac", disc_mac);
+        if (s_discovered[i].device_id[0]) {
+            cJSON_AddStringToObject(dev, "device_id", s_discovered[i].device_id);
+        }
+        if (s_discovered[i].name[0]) {
+            cJSON_AddStringToObject(dev, "name", s_discovered[i].name);
+        }
+        if (s_discovered[i].version[0]) {
+            cJSON_AddStringToObject(dev, "version", s_discovered[i].version);
+        }
+        cJSON_AddNumberToObject(dev, "rssi", s_discovered[i].rssi);
+        cJSON_AddNumberToObject(dev, "last_seen_ms", s_discovered[i].last_seen_ms);
+        cJSON_AddItemToArray(discovered, dev);
+    }
+    cJSON_AddItemToObject(root, "discovered", discovered);
 
     /* Export groups */
     cJSON *groups = cJSON_CreateArray();

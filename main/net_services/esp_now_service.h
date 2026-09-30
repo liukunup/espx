@@ -28,7 +28,17 @@ extern "C" {
 /** Maximum number of groups */
 #define ESPX_ESPNOW_MAX_GROUPS 10
 
-/** ESP-NOW peer info */
+/** Maximum number of discovered (unpaired) devices */
+#define ESPX_ESPNOW_MAX_DISCOVERED 20
+
+/** Discovery message types */
+#define ESPX_ESPNOW_DISCOVER_MSG       0x01
+#define ESPX_ESPNOW_ANNOUNCE_MSG       0x02
+
+/** Discovery broadcast interval (30 seconds) */
+#define ESPX_ESPNOW_ANNOUNCE_INTERVAL_MS  30000
+
+/** Peer info (for paired peers) */
 typedef struct {
     char id[32];              /**< Peer identifier */
     uint8_t mac[6];          /**< MAC address */
@@ -36,6 +46,17 @@ typedef struct {
     int64_t last_seen_ms;    /**< Last activity timestamp (ms) */
     int8_t rssi;             /**< Last RSSI */
 } espx_espnow_peer_info_t;
+
+/** Discovered device info (unpaired) */
+typedef struct {
+    uint8_t mac[6];          /**< MAC address */
+    char device_id[32];       /**< Device ID */
+    char name[32];           /**< Device name */
+    char version[16];         /**< Firmware version */
+    int64_t last_seen_ms;    /**< Last announcement timestamp */
+    int8_t rssi;             /**< Last RSSI */
+    bool pending_pair;        /**< Waiting for user confirmation */
+} espx_espnow_discovered_t;
 
 /** ESP-NOW group info */
 typedef struct {
@@ -201,6 +222,36 @@ const espx_espnow_group_info_t* espx_espnow_get_group(int index);
 typedef void (*espx_espnow_recv_callback_t)(const uint8_t *src_mac, uint8_t type,
                                             const uint8_t *data, size_t len, int8_t rssi);
 void espx_espnow_set_recv_callback(espx_espnow_recv_callback_t callback);
+
+/**
+ * @brief Trigger manual discovery scan
+ *
+ * Broadcasts a DISCOVER message to find nearby devices.
+ * Discovered devices will respond with ANNOUNCE.
+ *
+ * @return ESP_OK on success
+ */
+esp_err_t espx_espnow_discover(void);
+
+/**
+ * @brief Get discovered devices count
+ */
+int espx_espnow_get_discovered_count(void);
+
+/**
+ * @brief Get discovered device by index
+ */
+const espx_espnow_discovered_t* espx_espnow_get_discovered(int index);
+
+/**
+ * @brief Pair with a discovered device
+ */
+esp_err_t espx_espnow_pair_discovered(const uint8_t *mac);
+
+/**
+ * @brief Clear discovered devices list
+ */
+void espx_espnow_clear_discovered(void);
 
 /**
  * @brief Configure ESP-NOW from JSON
