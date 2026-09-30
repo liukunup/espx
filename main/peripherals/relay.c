@@ -107,7 +107,7 @@ static esp_err_t relay_write(device_t *dev, const cJSON *value)
 
 static esp_err_t relay_default_config(cJSON *config)
 {
-    cJSON_AddNumberToObject(config, "gpio", 5);
+    cJSON_AddNumberToObject(config, "gpio", 17);  // GPIO17: safe, no conflicts
     cJSON_AddNumberToObject(config, "active_level", 1);
     return ESP_OK;
 }

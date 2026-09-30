@@ -418,7 +418,7 @@ const I18N = {
     // setup modal
     setup_title: 'Setup:', led_index: 'LED Index', all_leds: 'All LEDs', led_n: 'LED {0}',
     rgb_color: 'RGB Color', brightness: 'Brightness:', applied: 'Applied',
-    quick_red: 'Red', quick_green: 'Green', quick_blue: 'Blue', quick_off: 'OFF',
+    quick_red: 'Red', quick_green: 'Green', quick_blue: 'Blue', quick_off: 'OFF', trigger: 'Trigger', high: 'High', low: 'Low',
     state_label: 'State', on: 'ON', off: 'OFF',
     no_quick_setup: 'No quick setup available for this peripheral type.',
     press_button: 'Press the button to trigger events. Current state is polled in real-time.',
@@ -501,8 +501,8 @@ const I18N = {
     // setup modal
     setup_title: '设置:', led_index: 'LED 索引', all_leds: '全部 LED', led_n: 'LED {0}',
     rgb_color: 'RGB 颜色', brightness: '亮度:', applied: '已应用',
-    quick_red: '红', quick_green: '绿', quick_blue: '蓝', quick_off: '关',
-    state_label: '状态', on: '开', off: '关',
+    quick_red: '红', quick_green: '绿', quick_blue: '蓝', quick_off: '关', trigger: '触发', high: '高电平', low: '低电平',
+    state_label: '状态', on: '闭合', off: '打开',
     no_quick_setup: '此类型暂不支持快捷设置。',
     press_button: '按下按钮触发事件。当前状态实时轮询。',
     // dynamic
@@ -890,6 +890,10 @@ async function loadPeripherals() {
               <button class="btn-rgb" style="background:#0000ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0000ff')">${t('quick_blue')}</button>
               <button class="btn-s" onclick="quickWrite('${esc(d.id)}', '#000000')">${t('quick_off')}</button>
               <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
+            ` : d.type === 'relay' ? `
+              <button class="btn-s" onclick="quickWrite('${esc(d.id)}', 'true')" style="background:#16a34a;color:#fff">${t('on') || 'ON'}</button>
+              <button class="btn-s" onclick="quickWrite('${esc(d.id)}', 'false')" style="background:#dc2626;color:#fff">${t('off') || 'OFF'}</button>
+              <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
             ` : `
               <button class="btn-s" onclick="devRead('${esc(d.id)}')">${t('read')}</button>
               <button class="btn-s" onclick="devToggle('${esc(d.id)}',${!d.enabled})">${d.enabled ? t('disable') : t('enable')}</button>
@@ -928,6 +932,10 @@ async function loadDevices() {
           <button class="btn-rgb" style="background:#00ff00;color:#fff" onclick="quickWrite('${esc(d.id)}', '#00ff00')">${t('quick_green')}</button>
           <button class="btn-rgb" style="background:#0000ff;color:#fff" onclick="quickWrite('${esc(d.id)}', '#0000ff')">${t('quick_blue')}</button>
           <button class="btn-s" onclick="quickWrite('${esc(d.id)}', '#000000')">${t('quick_off')}</button>
+          <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
+        ` : d.type === 'relay' ? `
+          <button class="btn-s" onclick="quickWrite('${esc(d.id)}', 'true')" style="background:#16a34a;color:#fff">${t('on') || 'ON'}</button>
+          <button class="btn-s" onclick="quickWrite('${esc(d.id)}', 'false')" style="background:#dc2626;color:#fff">${t('off') || 'OFF'}</button>
           <button class="btn-p" onclick="openSetup('${esc(d.id)}','${esc(d.type)}')">${t('setup')}</button>
         ` : `
           <button class="btn-s" onclick="devRead('${esc(d.id)}')">${t('read')}</button>
@@ -1016,7 +1024,23 @@ async function openSetup(id, type) {
       document.getElementById('setup-bright-val').textContent = e.target.value;
     });
   } else if (type === 'relay') {
+    // Fetch device config
+    let cfg = { gpio: 17, active_level: 1 };
+    try {
+      const devs = await api('/api/peripherals');
+      const dev = devs.find(x => x.id === id);
+      if (dev && dev.config) cfg = dev.config;
+    } catch(e) {}
     content.innerHTML = `
+      <div class="fg"><label>GPIO</label>
+        <input type="number" id="setup-gpio" min="0" max="48" value="${cfg.gpio || 17}" style="width:80px">
+      </div>
+      <div class="fg"><label>${t('trigger') || 'Trigger'}</label>
+        <select id="setup-active-level">
+          <option value="1" ${cfg.active_level == 1 ? 'selected' : ''}>${t('high') || 'High'}</option>
+          <option value="0" ${cfg.active_level == 0 ? 'selected' : ''}>${t('low') || 'Low'}</option>
+        </select>
+      </div>
       <div class="fg"><label>${t('state_label')}</label>
         <select id="setup-state">
           <option value="true">${t('on')}</option>
@@ -1045,13 +1069,19 @@ function setQuickColor(hex) {
   if (brightVal) brightVal.textContent = brightness;
 }
 
-async function quickWrite(id, hex) {
-  const r = parseInt(hex.slice(1,3), 16);
-  const g = parseInt(hex.slice(3,5), 16);
-  const b = parseInt(hex.slice(5,7), 16);
-  const brightness = hex === '#000000' ? 0 : 128;
+async function quickWrite(id, value) {
   try {
-    await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify({ all: { r, g, b }, brightness }) });
+    // Relay: boolean string 'true' or 'false'
+    if (value === 'true' || value === 'false') {
+      await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify({ state: value === 'true' }) });
+    } else {
+      // WS2812: hex color like #ff0000
+      const r = parseInt(value.slice(1,3), 16);
+      const g = parseInt(value.slice(3,5), 16);
+      const b = parseInt(value.slice(5,7), 16);
+      const brightness = value === '#000000' ? 0 : 128;
+      await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify({ all: { r, g, b }, brightness }) });
+    }
     toast(t('applied'));
   } catch (e) { toast(t('failed') + ': ' + e.message, 'err'); }
 }
@@ -1079,7 +1109,19 @@ document.getElementById('setup-save').addEventListener('click', async () => {
       value = { all: { r, g, b }, brightness };
     }
   } else if (gSetupType === 'relay') {
-    value = { state: document.getElementById('setup-state').value === 'true' };
+    // Get device current config
+    const devs = await api('/api/peripherals');
+    const dev = devs.find(x => x.id === id);
+    const gpio = parseInt(document.getElementById('setup-gpio').value) || 17;
+    const active_level = parseInt(document.getElementById('setup-active-level').value);
+    const state = document.getElementById('setup-state').value === 'true';
+    // Send config update first
+    await api('/api/peripherals/' + id, { method: 'POST', body: JSON.stringify({ config: { gpio, active_level } }) });
+    // Then write state
+    await api('/api/peripherals/' + id + '/write', { method: 'POST', body: JSON.stringify({ state }) });
+    toast(t('applied'));
+    setupModal.classList.remove('show');
+    return;
   }
 
   try {
@@ -1188,7 +1230,7 @@ async function loadEspNow() {
         '<div class="row"><div>' +
         '<div style="font-weight:600">' + (d.name || d.device_id || 'Unknown') + '</div>' +
         '<div class="meta">' + d.mac + (d.rssi ? ' · ' + d.rssi + ' dBm' : '') + (d.version ? ' · v' + d.version : '') + '</div>' +
-        '</div><button class="btn-d" onclick="espnowPair(\'"' + d.mac + "'\"')">Pair</button></div>'
+        '</div><button class="btn-d" onclick="espnowPair(' + d.mac + ')">Pair</button></div>'
       ).join('');
     } else {
       document.getElementById('espx-discovered-list').innerHTML = '<div class="meta">No devices discovered yet. Click "Scan" or wait for auto-announce.</div>';
